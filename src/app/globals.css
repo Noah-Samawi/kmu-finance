@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/*
+  Gestaltung: "Kassenbuch"
+  - Grün wie der Einband klassischer Kassenbücher, kühles Papiergrau als Fläche
+  - Plus = Grün, Minus = Himbeerrot, Achtung = Bernstein
+  - Ein einziges markantes Element: der Kassenbon (Guthaben-Karte mit
+    gezacktem Abriss) in der Mitarbeiter-App. Alles andere bleibt ruhig.
+*/
+@theme {
+  --color-paper: #f2f4f1;
+  --color-surface: #ffffff;
+  --color-ink: #1c2925;
+  --color-muted: #5f6e68;
+  --color-line: #d9e0db;
+  --color-ledger: #1e6b50;
+  --color-ledger-dark: #154d3a;
+  --color-ledger-soft: #e3efe9;
+  --color-minus: #a8323e;
+  --color-minus-soft: #f7e6e8;
+  --color-amber: #8a5a10;
+  --color-amber-soft: #fbf0dc;
+  --color-bon: #fffdf8;
+
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-bon: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* Beträge mit gleich breiten Ziffern -> Spalten stehen sauber untereinander */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px; /* verhindert iOS-Zoom beim Fokussieren */
+}
+
+/* Grid-Kinder dürfen schrumpfen (sonst sprengen lange Texte das Handy-Layout)
+   und strecken sich nicht auf die Höhe der Nachbarspalte */
+.grid {
+  align-items: start;
+}
+.grid > * {
+  min-width: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ledger);
+  outline-offset: 2px;
+}
+
+/* Kassenbon: gezackter Abriss unten */
+.bon {
+  background: var(--color-bon);
+  position: relative;
+  --tooth: 10px;
+  mask:
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / var(--tooth) 51% repeat-x,
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--tooth) / 2) no-repeat;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bon-print {
+    animation: bon-print 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  @keyframes bon-print {
+    from {
+      clip-path: inset(0 0 100% 0);
+      transform: translateY(-6px);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
+      transform: none;
+    }
+  }
+}

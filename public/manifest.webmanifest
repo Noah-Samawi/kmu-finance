@@ -1,0 +1,9 @@
+{
+  "name": "Kassenbuch",
+  "short_name": "Kassenbuch",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2f4f1",
+  "theme_color": "#1e6b50",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

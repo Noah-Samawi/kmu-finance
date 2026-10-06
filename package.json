@@ -1,0 +1,45 @@
+{
+  "name": "kmu-finance",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file=.env src/infrastructure/db/migrate.ts",
+    "db:seed": "tsx --env-file=.env src/infrastructure/db/seed.ts",
+    "e2e": "tsx --env-file=.env tests/e2e/smoke.ts",
+    "demo": "tsx --env-file=.env tests/e2e/demo-data.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/instrument-sans": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "bcryptjs": "3.0.3",
+    "date-fns": "4.4.0",
+    "date-fns-tz": "3.2.0",
+    "drizzle-orm": "^0.45.3",
+    "next": "15.5.27",
+    "pdf-lib": "1.17.1",
+    "pg": "^8.23.1",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "server-only": "^0.0.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "22.18.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "drizzle-kit": "^0.31.11",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}
