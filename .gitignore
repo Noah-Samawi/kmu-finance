@@ -3,6 +3,6 @@ node_modules
 .env
 .env.local
 .env*.local
-storage
+/storage/
 *.tsbuildinfo
 next-env.d.ts
