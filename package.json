@@ -9,10 +9,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx --env-file=.env src/infrastructure/db/migrate.ts",
-    "db:seed": "tsx --env-file=.env src/infrastructure/db/seed.ts",
-    "e2e": "tsx --env-file=.env tests/e2e/smoke.ts",
-    "demo": "tsx --env-file=.env tests/e2e/demo-data.ts"
+    "db:migrate": "tsx --env-file=.env --env-file=.env.local src/infrastructure/db/migrate.ts",
+    "db:seed": "tsx --env-file=.env --env-file=.env.local src/infrastructure/db/seed.ts",
+    "e2e": "tsx --env-file=.env --env-file=.env.local tests/e2e/smoke.ts",
+    "demo": "tsx --env-file=.env --env-file=.env.local tests/e2e/demo-data.ts"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",

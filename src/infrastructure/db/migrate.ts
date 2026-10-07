@@ -6,7 +6,10 @@ import { Pool } from "pg";
 
 async function main() {
   const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
-  const pool = new Pool({ connectionString: url });
+  if (!url) {
+    throw new Error("DATABASE_URL (oder MIGRATION_DATABASE_URL) fehlt in .env / .env.local");
+  }
+  const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
   await migrate(drizzle(pool), { migrationsFolder: "./drizzle" });
   await pool.end();
   console.log("✓ Migrationen angewendet");

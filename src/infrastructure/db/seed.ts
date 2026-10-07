@@ -7,7 +7,11 @@ import bcrypt from "bcryptjs";
 import * as s from "./schema";
 
 async function main() {
-  const pool = new Pool({ connectionString: process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL });
+  const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error("DATABASE_URL (oder MIGRATION_DATABASE_URL) fehlt in .env / .env.local");
+  }
+  const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
   const db = drizzle(pool, { schema: s });
 
   const email = (process.env.SEED_SUPERADMIN_EMAIL ?? "super@kmu.local").toLowerCase();
