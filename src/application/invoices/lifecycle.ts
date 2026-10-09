@@ -3,7 +3,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { contacts, invoiceItems, invoices, ledgerEntries, tenants } from "@/infrastructure/db/schema";
-import { storage } from "@/infrastructure/storage/local";
+import { storage } from "@/infrastructure/storage";
 import { renderInvoicePdf, type InvoicePdfData } from "@/infrastructure/pdf/invoice-pdf";
 import { notFound, rule } from "@/domain/errors";
 import { canCancel, canIssue, canMarkPaid, formatInvoiceNumber } from "@/domain/invoice";

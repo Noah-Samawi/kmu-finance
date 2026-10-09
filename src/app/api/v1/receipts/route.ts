@@ -4,6 +4,9 @@ import { badRequest } from "@/domain/errors";
 import { receiptFieldsSchema } from "@/lib/validation/schemas";
 import { listReceipts, submitReceipt } from "@/application/receipts/receipts";
 
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 const filter = z.object({
   status: z.enum(["SUBMITTED", "APPROVED", "REJECTED"]).optional(),
   employeeId: z.string().optional(),

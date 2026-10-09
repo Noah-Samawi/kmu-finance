@@ -4,20 +4,38 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { ledgerEntries, receipts, users } from "@/infrastructure/db/schema";
-import { storage } from "@/infrastructure/storage/local";
-import { badRequest, conflict, forbidden, notFound, rule } from "@/domain/errors";
+import { storage } from "@/infrastructure/storage";
+import { AppError, badRequest, conflict, forbidden, notFound, rule } from "@/domain/errors";
 import { deltasFor, reversalDeltas } from "@/domain/ledger";
 import { dateInputToDate, todayKey } from "@/domain/period";
 import { formatCents } from "@/domain/money";
 import { receiptFieldsSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import { audit, insertEntry, walletBalance } from "../ledger-service";
+import { ALLOWED_MIME, resolveReceiptMime } from "./mime";
 
-export const ALLOWED_MIME: Record<string, string> = {
-  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
-  "image/heic": "heic", "image/heif": "heif", "application/pdf": "pdf",
-};
+export { ALLOWED_MIME };
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+async function putFile(key: string, data: Buffer, mime: string) {
+  try {
+    await storage.put(key, data, mime);
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    console.error("storage.put failed", e);
+    throw new AppError(503, "STORAGE", "Belegdatei konnte nicht gespeichert werden");
+  }
+}
+
+async function getFile(key: string) {
+  try {
+    return await storage.get(key);
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    console.error("storage.get failed", e);
+    throw notFound("Belegdatei");
+  }
+}
 
 /**
  * Beleg einreichen. Regel 2: Betrag wird SOFORT vom Guthaben abgezogen.
@@ -30,8 +48,9 @@ export async function submitReceipt(
 ) {
   requireRole(ctx, "EMPLOYEE");
   const tenantId = tid(ctx);
-  const ext = ALLOWED_MIME[file.mime];
-  if (!ext) throw badRequest("Dateityp nicht erlaubt (JPG, PNG, WEBP, HEIC oder PDF)");
+  const mime = resolveReceiptMime(file.mime, file.data);
+  const ext = mime ? ALLOWED_MIME[mime] : undefined;
+  if (!mime || !ext) throw badRequest("Dateityp nicht erlaubt (JPG, PNG, WEBP, HEIC oder PDF)");
   if (file.data.length === 0) throw badRequest("Datei ist leer");
   if (file.data.length > MAX_FILE_BYTES) throw badRequest("Datei ist größer als 10 MB");
   if (input.receiptDate > todayKey()) throw rule("Belegdatum darf nicht in der Zukunft liegen");
@@ -50,12 +69,12 @@ export async function submitReceipt(
     }
 
     const fileKey = `${tenantId}/receipts/${ctx.userId}/${randomUUID()}.${ext}`;
-    await storage.put(fileKey, file.data);
+    await putFile(fileKey, file.data, mime);
     const [r] = await tx.insert(receipts).values({
       tenantId, employeeId: ctx.userId, amountCents: input.amountCents, vatRate: input.vatRate ?? null,
       merchant: input.merchant, description: input.description,
       receiptDate: dateInputToDate(input.receiptDate),
-      fileKey, fileMime: file.mime, fileSha256: sha,
+      fileKey, fileMime: mime, fileSha256: sha,
     }).returning();
     await insertEntry(tx, ctx, tenantId, {
       type: "RECEIPT", ...deltasFor("RECEIPT", input.amountCents), employeeId: ctx.userId,
@@ -96,7 +115,8 @@ export async function getReceiptFile(ctx: Ctx, id: string) {
     tx.query.receipts.findFirst({ where: and(eq(receipts.id, id), eq(receipts.tenantId, tenantId)) }));
   if (!r) throw notFound("Beleg");
   if (ctx.role === "EMPLOYEE" && r.employeeId !== ctx.userId) throw forbidden();
-  return { data: await storage.get(r.fileKey), mime: r.fileMime, name: `beleg-${r.id.slice(0, 8)}.${ALLOWED_MIME[r.fileMime]}` };
+  const ext = ALLOWED_MIME[r.fileMime] ?? "bin";
+  return { data: await getFile(r.fileKey), mime: r.fileMime, name: `beleg-${r.id.slice(0, 8)}.${ext}` };
 }
 
 /**
