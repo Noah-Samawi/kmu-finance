@@ -4,8 +4,8 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { ledgerEntries, receipts, users } from "@/infrastructure/db/schema";
-import { storage } from "@/infrastructure/storage";
-import { AppError, badRequest, conflict, forbidden, notFound, rule } from "@/domain/errors";
+import { storage, storageDiagnostics } from "@/infrastructure/storage";
+import { AppError, isAppError, badRequest, conflict, forbidden, notFound, rule } from "@/domain/errors";
 import { deltasFor, reversalDeltas } from "@/domain/ledger";
 import { dateInputToDate, todayKey } from "@/domain/period";
 import { formatCents } from "@/domain/money";
@@ -17,13 +17,28 @@ import { ALLOWED_MIME, resolveReceiptMime } from "./mime";
 export { ALLOWED_MIME };
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+function pgCode(e: unknown): string | undefined {
+  if (typeof e === "object" && e && "code" in e && typeof (e as { code: unknown }).code === "string") {
+    return (e as { code: string }).code;
+  }
+  const cause = (e as { cause?: { code?: string } })?.cause;
+  return typeof cause?.code === "string" ? cause.code : undefined;
+}
+
 async function putFile(key: string, data: Buffer, mime: string) {
+  const diag = storageDiagnostics();
   try {
+    console.info("[receipts] storage.put", { key, bytes: data.length, mime, ...diag });
     await storage.put(key, data, mime);
   } catch (e) {
-    if (e instanceof AppError) throw e;
-    console.error("storage.put failed", e);
-    throw new AppError(503, "STORAGE", "Belegdatei konnte nicht gespeichert werden");
+    if (isAppError(e)) throw e;
+    console.error("[receipts] STORAGE Fehler (Blob/S3/lokal)", {
+      key,
+      ...diag,
+      name: e instanceof Error ? e.name : typeof e,
+      message: e instanceof Error ? e.message : String(e),
+    });
+    throw new AppError(503, "STORAGE", `Belegdatei konnte nicht gespeichert werden (${diag.backend})`);
   }
 }
 
@@ -31,8 +46,8 @@ async function getFile(key: string) {
   try {
     return await storage.get(key);
   } catch (e) {
-    if (e instanceof AppError) throw e;
-    console.error("storage.get failed", e);
+    if (isAppError(e)) throw e;
+    console.error("[receipts] STORAGE Lesefehler", { key, ...storageDiagnostics(), message: e instanceof Error ? e.message : String(e) });
     throw notFound("Belegdatei");
   }
 }
@@ -55,34 +70,53 @@ export async function submitReceipt(
   if (file.data.length > MAX_FILE_BYTES) throw badRequest("Datei ist größer als 10 MB");
   if (input.receiptDate > todayKey()) throw rule("Belegdatum darf nicht in der Zukunft liegen");
   const sha = createHash("sha256").update(file.data).digest("hex");
+  const fileKey = `${tenantId}/receipts/${ctx.userId}/${randomUUID()}.${ext}`;
 
-  return withTenant(ctx, async (tx) => {
-    await lockTenantLedger(tx, tenantId);
-    const dup = await tx.query.receipts.findFirst({
-      where: and(eq(receipts.tenantId, tenantId), eq(receipts.fileSha256, sha)),
+  // Blob/S3 außerhalb der DB-Transaktion: sonst hält ein langsamer Upload den Ledger-Lock und endet als 500.
+  await putFile(fileKey, file.data, mime);
+
+  try {
+    return await withTenant(ctx, async (tx) => {
+      await lockTenantLedger(tx, tenantId);
+      const dup = await tx.query.receipts.findFirst({
+        where: and(eq(receipts.tenantId, tenantId), eq(receipts.fileSha256, sha)),
+      });
+      if (dup) throw conflict("Dieser Beleg wurde bereits hochgeladen");
+
+      const balance = await walletBalance(tx, tenantId, ctx.userId);
+      if (input.amountCents > balance) {
+        throw rule(`Beleg (${formatCents(input.amountCents)}) übersteigt dein Guthaben (${formatCents(balance)}). Bitte bei der Geschäftsführung melden.`);
+      }
+
+      const [r] = await tx.insert(receipts).values({
+        tenantId, employeeId: ctx.userId, amountCents: input.amountCents, vatRate: input.vatRate ?? null,
+        merchant: input.merchant, description: input.description,
+        receiptDate: dateInputToDate(input.receiptDate),
+        fileKey, fileMime: mime, fileSha256: sha,
+      }).returning();
+      await insertEntry(tx, ctx, tenantId, {
+        type: "RECEIPT", ...deltasFor("RECEIPT", input.amountCents), employeeId: ctx.userId,
+        receiptId: r.id, description: `${input.merchant}${input.description ? ` – ${input.description}` : ""}`,
+      });
+      await audit(tx, ctx, "receipt.submitted", "Receipt", r.id, { amountCents: input.amountCents });
+      return { receipt: r, walletBalanceCents: balance - input.amountCents };
     });
-    if (dup) throw conflict("Dieser Beleg wurde bereits hochgeladen");
-
-    const balance = await walletBalance(tx, tenantId, ctx.userId);
-    if (input.amountCents > balance) {
-      throw rule(`Beleg (${formatCents(input.amountCents)}) übersteigt dein Guthaben (${formatCents(balance)}). Bitte bei der Geschäftsführung melden.`);
-    }
-
-    const fileKey = `${tenantId}/receipts/${ctx.userId}/${randomUUID()}.${ext}`;
-    await putFile(fileKey, file.data, mime);
-    const [r] = await tx.insert(receipts).values({
-      tenantId, employeeId: ctx.userId, amountCents: input.amountCents, vatRate: input.vatRate ?? null,
-      merchant: input.merchant, description: input.description,
-      receiptDate: dateInputToDate(input.receiptDate),
-      fileKey, fileMime: mime, fileSha256: sha,
-    }).returning();
-    await insertEntry(tx, ctx, tenantId, {
-      type: "RECEIPT", ...deltasFor("RECEIPT", input.amountCents), employeeId: ctx.userId,
-      receiptId: r.id, description: `${input.merchant}${input.description ? ` – ${input.description}` : ""}`,
+  } catch (e) {
+    if (isAppError(e)) throw e;
+    const code = pgCode(e);
+    console.error("[receipts] DATABASE Fehler", {
+      fileKey,
+      pgCode: code,
+      ...storageDiagnostics(),
+      name: e instanceof Error ? e.name : typeof e,
+      message: e instanceof Error ? e.message : String(e),
     });
-    await audit(tx, ctx, "receipt.submitted", "Receipt", r.id, { amountCents: input.amountCents });
-    return { receipt: r, walletBalanceCents: balance - input.amountCents };
-  });
+    throw new AppError(
+      503,
+      "DATABASE",
+      `Datenbankfehler beim Speichern des Belegs${code ? ` (${code})` : ""}`,
+    );
+  }
 }
 
 /** Admin: alle Belege; Mitarbeiter: nur eigene (zusätzlich per RLS erzwungen) */

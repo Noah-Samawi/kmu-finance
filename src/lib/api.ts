@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ZodError, type ZodTypeAny, type z } from "zod";
-import { AppError, badRequest, forbidden, unauthorized } from "@/domain/errors";
+import { isAppError, badRequest, forbidden, unauthorized } from "@/domain/errors";
 import { resolveSession, SESSION_COOKIE, type AuthUser } from "@/infrastructure/auth/session";
 import type { Role } from "@/infrastructure/db/schema";
 
@@ -49,24 +49,47 @@ function assertSameOrigin(req: NextRequest) {
   if (new URL(origin).host !== host) throw forbidden("Ungültige Herkunft (CSRF-Schutz)");
 }
 
+export function errorDetails(e: unknown) {
+  if (!e || typeof e !== "object") return { message: String(e) };
+  const o = e as { name?: string; message?: string; code?: unknown; status?: unknown; cause?: unknown; stack?: string };
+  const cause = o.cause && typeof o.cause === "object" ? (o.cause as { code?: unknown; message?: string }) : undefined;
+  return {
+    name: o.name,
+    message: o.message,
+    code: o.code,
+    status: o.status,
+    causeCode: cause?.code,
+    causeMessage: cause?.message,
+    stack: o.stack?.split("\n").slice(0, 12),
+  };
+}
+
+function pgCode(e: unknown): string | undefined {
+  if (typeof e === "object" && e && "code" in e && typeof (e as { code: unknown }).code === "string") {
+    return (e as { code: string }).code;
+  }
+  const cause = (e as { cause?: { code?: string } })?.cause;
+  return typeof cause?.code === "string" ? cause.code : undefined;
+}
+
 export function errorResponse(e: unknown) {
-  if (e instanceof AppError) {
+  if (isAppError(e)) {
     return NextResponse.json({ error: { code: e.code, message: e.message } }, { status: e.status });
   }
   if (e instanceof ZodError) {
     const message = e.issues.map((i) => `${i.path.join(".") || "Eingabe"}: ${i.message}`).join("; ");
     return NextResponse.json({ error: { code: "VALIDATION", message, issues: e.issues } }, { status: 400 });
   }
-  // Postgres: Unique-Verletzung -> 409 statt 500
-  if (typeof e === "object" && e && "code" in e && (e as { code: string }).code === "23505") {
+  const code = pgCode(e);
+  if (code === "23505") {
     return NextResponse.json({ error: { code: "CONFLICT", message: "Eintrag existiert bereits" } }, { status: 409 });
   }
-  const cause = (e as { cause?: { code?: string } })?.cause;
-  if (cause?.code === "23505") {
-    return NextResponse.json({ error: { code: "CONFLICT", message: "Eintrag existiert bereits" } }, { status: 409 });
-  }
-  console.error(e);
-  return NextResponse.json({ error: { code: "INTERNAL", message: "Interner Fehler" } }, { status: 500 });
+  console.error("[api] uncaught", errorDetails(e));
+  const hint = code ? ` (DB ${code})` : "";
+  return NextResponse.json(
+    { error: { code: "INTERNAL", message: `Interner Fehler${hint}` } },
+    { status: 500 },
+  );
 }
 
 export async function body<S extends ZodTypeAny>(req: NextRequest, schema: S): Promise<z.infer<S>> {
