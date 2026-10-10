@@ -3,7 +3,7 @@ import { errorDetails, query, route } from "@/lib/api";
 import { AppError, badRequest, isAppError } from "@/domain/errors";
 import { receiptFieldsSchema } from "@/lib/validation/schemas";
 import { listReceipts, submitReceipt } from "@/application/receipts/receipts";
-import { storageDiagnostics } from "@/infrastructure/storage";
+import { blobToken, blobTokenSource, storageDiagnostics } from "@/infrastructure/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -31,8 +31,20 @@ export const POST = route(["EMPLOYEE"], async ({ req, ctx }) => {
     contentLength: req.headers.get("content-length"),
     ...diag,
   });
-  if (!diag.blobTokenPresent && diag.backend === "missing") {
-    console.error("[receipts POST] BLOB_READ_WRITE_TOKEN fehlt (process.env dynamisch gelesen)", diag);
+  const token = blobToken();
+  if (!token) {
+    console.error(
+      "[receipts POST] KEIN Vercel-Blob-Token gefunden. " +
+        "Weder process.env.BLOB_READ_WRITE_TOKEN noch process.env.VERCEL_BLOB_READ_WRITE_TOKEN ist gesetzt. " +
+        "In Vercel: Storage → Blob Store mit dem Projekt verknüpfen oder eine der beiden Env-Vars setzen.",
+      diag,
+    );
+  } else {
+    console.info("[receipts POST] Blob-Token gelesen", {
+      source: blobTokenSource(),
+      length: token.length,
+      prefix: `${token.slice(0, 12)}…`,
+    });
   }
 
   let form: FormData;

@@ -44,5 +44,5 @@ export const storage: Storage = {
   get: (key) => backend().get(key),
 };
 
-export { storageDiagnostics, selectedBackend, blobToken } from "./env";
+export { storageDiagnostics, selectedBackend, blobToken, blobTokenSource } from "./env";
 export type { Storage } from "./types";

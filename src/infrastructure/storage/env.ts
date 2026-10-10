@@ -7,7 +7,22 @@ export function envStr(name: string): string | undefined {
 }
 
 export function blobToken(): string | undefined {
-  return envStr("BLOB_READ_WRITE_TOKEN");
+  const raw =
+    process.env.BLOB_READ_WRITE_TOKEN ||
+    process.env.VERCEL_BLOB_READ_WRITE_TOKEN ||
+    envStr("BLOB_READ_WRITE_TOKEN") ||
+    envStr("VERCEL_BLOB_READ_WRITE_TOKEN");
+  if (typeof raw !== "string") return undefined;
+  const t = raw.trim().replace(/^["']|["']$/g, "");
+  return t || undefined;
+}
+
+export function blobTokenSource(): "BLOB_READ_WRITE_TOKEN" | "VERCEL_BLOB_READ_WRITE_TOKEN" | null {
+  if (envStr("BLOB_READ_WRITE_TOKEN") || process.env.BLOB_READ_WRITE_TOKEN?.trim()) return "BLOB_READ_WRITE_TOKEN";
+  if (envStr("VERCEL_BLOB_READ_WRITE_TOKEN") || process.env.VERCEL_BLOB_READ_WRITE_TOKEN?.trim()) {
+    return "VERCEL_BLOB_READ_WRITE_TOKEN";
+  }
+  return null;
 }
 
 export type StorageBackendName = "vercel-blob" | "s3" | "local" | "missing";
@@ -34,6 +49,7 @@ export function storageDiagnostics() {
     vercel: Boolean(process.env.VERCEL),
     backend: selectedBackend(),
     blobTokenPresent: Boolean(token),
+    blobTokenSource: blobTokenSource(),
     blobTokenLength: token?.length ?? 0,
     blobTokenPrefix: token ? `${token.slice(0, 12)}…` : null,
     blobStoreIdPresent: Boolean(envStr("BLOB_STORE_ID")),
