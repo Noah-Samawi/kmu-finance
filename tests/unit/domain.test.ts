@@ -68,6 +68,19 @@ describe("ledger", () => {
   });
 });
 
+describe("receipt inline data-url", () => {
+  it("rundtrip Base64-Data-URL", async () => {
+    const { parseReceiptDataUrl, toReceiptDataUrl } = await import("@/application/receipts/inline-file");
+    const buf = Buffer.from([0xff, 0xd8, 0xff, 0x01, 0x02]);
+    const url = toReceiptDataUrl("image/jpeg", buf);
+    expect(url.startsWith("data:image/jpeg;base64,")).toBe(true);
+    const parsed = parseReceiptDataUrl(url);
+    expect(parsed?.mime).toBe("image/jpeg");
+    expect(parsed?.data.equals(buf)).toBe(true);
+    expect(parseReceiptDataUrl("tenant/receipts/x.jpg")).toBeNull();
+  });
+});
+
 describe("period (Europe/Berlin)", () => {
   it("Tagesgrenzen in deutscher Zeit (Sommerzeit)", () => {
     expect(dayRange("2026-10-06").start.toISOString()).toBe("2026-10-05T22:00:00.000Z");

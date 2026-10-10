@@ -33,10 +33,9 @@ export const POST = route(["EMPLOYEE"], async ({ req, ctx }) => {
   });
   const token = blobToken();
   if (!token) {
-    console.error(
-      "[receipts POST] KEIN Vercel-Blob-Token gefunden. " +
-        "Weder process.env.BLOB_READ_WRITE_TOKEN noch process.env.VERCEL_BLOB_READ_WRITE_TOKEN ist gesetzt. " +
-        "In Vercel: Storage → Blob Store mit dem Projekt verknüpfen oder eine der beiden Env-Vars setzen.",
+    console.info(
+      "[receipts POST] kein Blob-Token (BLOB_READ_WRITE_TOKEN / VERCEL_BLOB_READ_WRITE_TOKEN) – " +
+        "Belegbild wird als Base64-Data-URL in PostgreSQL gespeichert.",
       diag,
     );
   } else {

@@ -148,6 +148,7 @@ async function main() {
   check((await M.get("/api/v1/pool")).status === 403, "Mitarbeiter: kein Pool");
   check((await M.post("/api/v1/pool/allocations", { employeeId: e1, amountCents: 100 })).status === 403, "Mitarbeiter kann sich nichts zuteilen");
   check((await M.post(`/api/v1/employees/${e1}/adjust`, { toZero: true, description: "hack" })).status === 403, "Mitarbeiter kann keine Ausgleiche buchen");
+  check((await M.post(`/api/v1/employees/${e1}/reset-budget`)).status === 403, "Mitarbeiter kann Budget nicht auf 0 setzen");
   const ownLedger = (await M.get(`/api/v1/ledger?employeeId=${e2}`)).data.entries;
   check(ownLedger.every((e: any) => e.employeeId === e1), "Mitarbeiter sieht nur eigene Buchungen (auch bei Fremd-ID)");
   check((await M.get(`/api/v1/receipts/${r1.data.receipt.id}/file`)).status === 200, "Eigenes Belegfoto abrufbar");
@@ -162,8 +163,8 @@ async function main() {
 
   const adj = await A.post(`/api/v1/employees/${e1}/adjust`, { amountCents: "1.000,00", description: "zu viel" });
   check(adj.status === 422, "Ausgleich über Guthaben blockiert");
-  const zero = await A.post(`/api/v1/employees/${e1}/adjust`, { toZero: true, description: "Barzahlung ohne Quittung" });
-  check(zero.data.walletBalanceCents === 0, "Ausgleich setzt Konto auf 0,00 €");
+  const zero = await A.post(`/api/v1/employees/${e1}/reset-budget`);
+  check(zero.data.walletBalanceCents === 0, "Admin setzt Budget auf 0,00 €");
 
   await A.post("/api/v1/pool/allocations", { employeeId: e2, amountCents: 5000 });
   const ret = await A.post(`/api/v1/employees/${e2}/return`, { all: true });

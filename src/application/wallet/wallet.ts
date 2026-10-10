@@ -31,6 +31,14 @@ export async function adjustWallet(ctx: Ctx, employeeId: string, input: z.infer<
   });
 }
 
+/** Admin: Mitarbeiter-Guthaben per Ausgleichsbuchung auf genau 0,00 € setzen. */
+export async function resetWalletToZero(ctx: Ctx, employeeId: string) {
+  return adjustWallet(ctx, employeeId, adjustSchema.parse({
+    toZero: true,
+    description: "Budget auf 0,00 € gesetzt",
+  }));
+}
+
 /** Restgeld vom Mitarbeiter zurück in den Pool */
 export async function returnToPool(ctx: Ctx, employeeId: string, input: z.infer<typeof returnSchema>) {
   requireRole(ctx, "ADMIN");

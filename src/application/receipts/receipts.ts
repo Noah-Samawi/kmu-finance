@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { ledgerEntries, receipts, users } from "@/infrastructure/db/schema";
-import { storage, storageDiagnostics } from "@/infrastructure/storage";
+import { blobToken, storage, storageDiagnostics } from "@/infrastructure/storage";
 import { AppError, isAppError, badRequest, conflict, forbidden, notFound, rule } from "@/domain/errors";
 import { deltasFor, reversalDeltas } from "@/domain/ledger";
 import { dateInputToDate, todayKey } from "@/domain/period";
@@ -13,6 +13,7 @@ import { receiptFieldsSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import { audit, insertEntry, walletBalance } from "../ledger-service";
 import { ALLOWED_MIME, resolveReceiptMime } from "./mime";
+import { parseReceiptDataUrl, toReceiptDataUrl } from "./inline-file";
 
 export { ALLOWED_MIME };
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -70,10 +71,21 @@ export async function submitReceipt(
   if (file.data.length > MAX_FILE_BYTES) throw badRequest("Datei ist größer als 10 MB");
   if (input.receiptDate > todayKey()) throw rule("Belegdatum darf nicht in der Zukunft liegen");
   const sha = createHash("sha256").update(file.data).digest("hex");
-  const fileKey = `${tenantId}/receipts/${ctx.userId}/${randomUUID()}.${ext}`;
+  const storeInline = !blobToken();
+  const fileKey = storeInline
+    ? toReceiptDataUrl(mime, file.data)
+    : `${tenantId}/receipts/${ctx.userId}/${randomUUID()}.${ext}`;
 
-  // Blob/S3 außerhalb der DB-Transaktion: sonst hält ein langsamer Upload den Ledger-Lock und endet als 500.
-  await putFile(fileKey, file.data, mime);
+  if (storeInline) {
+    console.info("[receipts] kein Blob-Token – Datei als Base64-Data-URL in PostgreSQL (Receipt.fileKey)", {
+      bytes: file.data.length,
+      mime,
+      dataUrlChars: fileKey.length,
+    });
+  } else {
+    // Blob außerhalb der DB-Transaktion: sonst hält ein langsamer Upload den Ledger-Lock.
+    await putFile(fileKey, file.data, mime);
+  }
 
   try {
     return await withTenant(ctx, async (tx) => {
@@ -105,7 +117,7 @@ export async function submitReceipt(
     if (isAppError(e)) throw e;
     const code = pgCode(e);
     console.error("[receipts] DATABASE Fehler", {
-      fileKey,
+      fileKey: storeInline ? "(inline-data-url)" : fileKey,
       pgCode: code,
       ...storageDiagnostics(),
       name: e instanceof Error ? e.name : typeof e,
@@ -150,7 +162,9 @@ export async function getReceiptFile(ctx: Ctx, id: string) {
   if (!r) throw notFound("Beleg");
   if (ctx.role === "EMPLOYEE" && r.employeeId !== ctx.userId) throw forbidden();
   const ext = ALLOWED_MIME[r.fileMime] ?? "bin";
-  return { data: await getFile(r.fileKey), mime: r.fileMime, name: `beleg-${r.id.slice(0, 8)}.${ext}` };
+  const inline = parseReceiptDataUrl(r.fileKey);
+  const data = inline ? inline.data : await getFile(r.fileKey);
+  return { data, mime: r.fileMime, name: `beleg-${r.id.slice(0, 8)}.${ext}` };
 }
 
 /**

@@ -24,6 +24,29 @@ export function CreateEmployeeForm() {
   );
 }
 
+export function ResetBudgetButton({ id, balanceCents }: { id: string; balanceCents: number }) {
+  const { call, busy, error } = useApi();
+  if (balanceCents <= 0) return null;
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        disabled={busy}
+        className={cx(btn.base, btn.danger, btn.sm)}
+        onClick={async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!confirm(`Guthaben von ${formatCents(balanceCents)} auf 0,00 € setzen? Das wird als Ausgleich ohne Beleg gebucht.`)) return;
+          await call("POST", `/api/v1/employees/${id}/reset-budget`);
+        }}
+      >
+        {busy ? "Wird gesetzt …" : "Budget auf 0,00 € setzen"}
+      </button>
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
 /** Ausgleich, Rückführung, Sperren, Passwort */
 export function WalletActions({ id, balanceCents, isActive }: { id: string; balanceCents: number; isActive: boolean }) {
   const { call, busy, error } = useApi();
@@ -32,6 +55,7 @@ export function WalletActions({ id, balanceCents, isActive }: { id: string; bala
 
   return (
     <div className="space-y-3">
+      <ResetBudgetButton id={id} balanceCents={balanceCents} />
       <div className="flex flex-wrap gap-2">
         <button className={cx(btn.base, btn.secondary, btn.sm)} disabled={balanceCents <= 0} onClick={() => toggle("adjust")}>Ausgleich buchen</button>
         <button className={cx(btn.base, btn.secondary, btn.sm)} disabled={balanceCents <= 0} onClick={() => toggle("return")}>Restgeld zurücknehmen</button>
