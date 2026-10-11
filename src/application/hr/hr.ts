@@ -1,9 +1,9 @@
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
-import { employeeProfiles, hrDocuments, payslips } from "@/infrastructure/db/schema";
+import { employeeProfiles, hrDocuments, payslips, tenants, users } from "@/infrastructure/db/schema";
 import { conflict, notFound } from "@/domain/errors";
-import { calculatePayslip } from "@/domain/payroll";
+import { calculatePayslip, monthlyGrossFromHours } from "@/domain/payroll";
 import { dateInputToDate } from "@/domain/period";
 import { hrProfileSchema, payslipCreateSchema } from "@/lib/validation/schemas";
 import { toReceiptDataUrl } from "../receipts/inline-file";
@@ -50,11 +50,10 @@ export async function upsertProfile(ctx: Ctx, employeeId: string, input: z.infer
       weeklyHours: input.weeklyHours || null,
       hourlyRateCents: input.hourlyRateCents ?? 0,
       hoursPerMonth: input.hoursPerMonth || null,
-      monthlyGrossCents: input.monthlyGrossCents ?? (
-        input.hourlyRateCents && input.hoursPerMonth
-          ? Math.round(Number(String(input.hoursPerMonth).replace(",", ".")) * input.hourlyRateCents)
-          : 0
-      ), notes: input.notes,
+      monthlyGrossCents: monthlyGrossFromHours(
+        Number(String(input.hoursPerMonth ?? "").replace(",", ".")) || 0,
+        input.hourlyRateCents ?? 0,
+      ) || input.monthlyGrossCents || 0, notes: input.notes,
     };
     const existing = await tx.query.employeeProfiles.findFirst({ where: eq(employeeProfiles.userId, employeeId) });
     const [row] = existing
@@ -108,7 +107,7 @@ export async function createPayslip(ctx: Ctx, employeeId: string, input: z.infer
     const profile = await tx.query.employeeProfiles.findFirst({ where: eq(employeeProfiles.userId, employeeId) });
     const hours = input.hoursWorked ?? (profile?.hoursPerMonth != null ? Number(profile.hoursPerMonth) : undefined);
     const rate = input.hourlyRateCents ?? profile?.hourlyRateCents ?? 0;
-    const fromHours = hours != null && rate > 0 ? Math.round(hours * rate) : 0;
+    const fromHours = hours != null ? monthlyGrossFromHours(hours, rate) : 0;
     const gross = input.grossCents ?? (fromHours || profile?.monthlyGrossCents || 0);
     if (gross <= 0) throw conflict("Bitte Bruttolohn oder Stunden × Stundenlohn angeben");
     const calc = calculatePayslip({
@@ -122,18 +121,31 @@ export async function createPayslip(ctx: Ctx, employeeId: string, input: z.infer
       where: and(eq(payslips.tenantId, tenantId), eq(payslips.employeeId, employeeId), eq(payslips.year, input.year), eq(payslips.month, input.month)),
     });
     if (exists) throw conflict("Für diesen Monat existiert bereits eine Abrechnung");
+    const t = (await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }))!;
     const pdf = await renderPayslipPdf({
-      employerName: ctx.tenantName ?? "Betrieb", employeeName: emp.name,
-      year: input.year, month: input.month, ...calc,
+      ...calc,
+      employer: { name: t.name, legalName: t.legalName, street: t.street, zip: t.zip, city: t.city },
+      employeeName: emp.name,
+      employeeStreet: profile?.street, employeeZip: profile?.zip, employeeCity: profile?.city,
+      year: input.year, month: input.month,
       hoursWorked: hours ?? null, hourlyRateCents: rate,
       taxClass: profile?.taxClass ?? 1, churchTax: profile?.churchTax ?? "NONE",
-      jobTitle: profile?.jobTitle ?? null, iban: profile?.iban ?? null,
+      childAllowances: profile?.childAllowances ?? 0,
+      jobTitle: profile?.jobTitle ?? null, iban: profile?.iban ?? null, bic: profile?.bic ?? null,
+      dateOfBirth: profile?.dateOfBirth ?? null, startDate: profile?.startDate ?? null,
+      socialSecurityNumber: profile?.socialSecurityNumber ?? null, taxId: profile?.taxId ?? null,
+      healthInsuranceName: profile?.healthInsuranceName ?? null,
+      personnelNumber: `PN-${emp.id.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      pgrs: "101", bgrs: "1111",
     });
     const pdfKey = toReceiptDataUrl("application/pdf", Buffer.from(pdf));
     const [row] = await tx.insert(payslips).values({
       tenantId, employeeId, year: input.year, month: input.month,
       hoursWorked: hours != null ? String(hours) : null, hourlyRateCents: rate,
-      ...calc, taxClass: profile?.taxClass ?? 1,
+      grossCents: calc.grossCents, rvCents: calc.rvCents, avCents: calc.avCents,
+      kvCents: calc.kvCents, pvCents: calc.pvCents, wageTaxCents: calc.wageTaxCents,
+      soliCents: calc.soliCents, churchTaxCents: calc.churchTaxCents, netCents: calc.netCents,
+      taxClass: profile?.taxClass ?? 1,
       childAllowances: profile?.childAllowances ?? 0,
       churchTax: profile?.churchTax ?? "NONE",
       pdfKey, createdById: ctx.userId,
@@ -151,11 +163,30 @@ export async function getPayslipPdf(ctx: Ctx, employeeId: string, payslipId: str
     const p = await tx.query.payslips.findFirst({
       where: and(eq(payslips.id, payslipId), eq(payslips.tenantId, tenantId), eq(payslips.employeeId, employeeId)),
     });
-    if (!p?.pdfKey) throw notFound("Lohnabrechnung");
-    const { parseReceiptDataUrl } = await import("../receipts/inline-file");
-    const inline = parseReceiptDataUrl(p.pdfKey);
-    if (!inline) throw notFound("PDF");
-    return { data: inline.data, mime: "application/pdf" as const, name: `lohnabrechnung-${p.year}-${String(p.month).padStart(2, "0")}.pdf` };
+    if (!p) throw notFound("Lohnabrechnung");
+    const emp = await tx.query.users.findFirst({ where: eq(users.id, employeeId) });
+    const profile = await tx.query.employeeProfiles.findFirst({ where: eq(employeeProfiles.userId, employeeId) });
+    const t = (await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }))!;
+    const calc = calculatePayslip({
+      grossCents: p.grossCents, taxClass: p.taxClass, childAllowances: p.childAllowances,
+      churchTax: p.churchTax, kvAdditionalBp: profile?.kvAdditionalBp ?? 250,
+    });
+    const hours = p.hoursWorked != null ? Number(p.hoursWorked) : null;
+    const pdf = await renderPayslipPdf({
+      ...calc,
+      employer: { name: t.name, legalName: t.legalName, street: t.street, zip: t.zip, city: t.city },
+      employeeName: emp?.name ?? "Mitarbeiter",
+      employeeStreet: profile?.street, employeeZip: profile?.zip, employeeCity: profile?.city,
+      year: p.year, month: p.month, hoursWorked: hours, hourlyRateCents: p.hourlyRateCents,
+      taxClass: p.taxClass, churchTax: p.churchTax, childAllowances: p.childAllowances,
+      jobTitle: profile?.jobTitle ?? null, iban: profile?.iban ?? null, bic: profile?.bic ?? null,
+      dateOfBirth: profile?.dateOfBirth ?? null, startDate: profile?.startDate ?? null,
+      socialSecurityNumber: profile?.socialSecurityNumber ?? null, taxId: profile?.taxId ?? null,
+      healthInsuranceName: profile?.healthInsuranceName ?? null,
+      personnelNumber: `PN-${employeeId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      pgrs: "101", bgrs: "1111",
+    });
+    return { data: Buffer.from(pdf), mime: "application/pdf" as const, name: `lohnabrechnung-${p.year}-${String(p.month).padStart(2, "0")}.pdf` };
   });
 }
 

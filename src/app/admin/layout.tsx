@@ -13,7 +13,7 @@ const NAV = [
   { href: "/admin/bank", label: "Kontoauszüge" },
   { href: "/admin/employees", label: "Personal / HR" },
   { href: "/admin/partners", label: "Partner & Gesellschafter" },
-  { href: "/admin/settings", label: "Briefkopf & Firma" },
+  { href: "/admin/briefkopf", label: "Briefkopf & Firma" },
   { href: "/admin/receipts", label: "Belege prüfen", badgeKey: "receipts" },
   { href: "/admin/reports", label: "Berichte & Abschlüsse" },
 ] as const;

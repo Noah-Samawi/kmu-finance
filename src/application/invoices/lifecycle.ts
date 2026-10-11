@@ -160,19 +160,28 @@ export async function cancelInvoice(ctx: Ctx, id: string, reason: string) {
   });
 }
 
-/** Archiviertes PDF ausliefern; für Entwürfe eine Vorschau erzeugen */
+/** PDF mit aktuellem Briefkopf erzeugen (Entwurf und ausgestellte Rechnungen). */
 export async function getInvoicePdf(ctx: Ctx, id: string): Promise<{ filename: string; data: Uint8Array }> {
   requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);
   const inv = await withTenant(ctx, (tx) => loadInvoiceFull(tx, tenantId, id));
-  if (inv.pdfKey) return { filename: `${inv.number}.pdf`, data: await storage.get(inv.pdfKey) };
   const t = await withTenant(ctx, (tx) => tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }));
+  const snap = inv.recipientSnapshot as Snapshot | null;
   const data = await renderInvoicePdf({
-    number: null, isDraft: true, isCancellation: false, issueDate: new Date(),
+    number: inv.number, isDraft: inv.status === "DRAFT",
+    isCancellation: !!inv.cancelsInvoiceId,
+    cancelsNumber: inv.cancels?.number,
+    issueDate: inv.issueDate ?? new Date(),
     serviceDate: inv.serviceDate, dueDate: inv.dueDate, notes: inv.notes, items: inv.items,
-    issuer: { ...t!, smallBusiness: t!.smallBusiness, logoKey: t!.logoKey, invoiceFooter: t!.invoiceFooter },
-    recipient: inv.contact, netCents: inv.netCents, vatCents: inv.vatCents, grossCents: inv.grossCents,
+    issuer: {
+      legalName: t!.legalName, street: t!.street, zip: t!.zip, city: t!.city,
+      taxNumber: t!.taxNumber, vatId: t!.vatId, iban: t!.iban, bic: t!.bic,
+      smallBusiness: t!.smallBusiness, logoKey: t!.logoKey, invoiceFooter: t!.invoiceFooter,
+    },
+    recipient: snap?.recipient ?? inv.contact,
+    netCents: inv.netCents, vatCents: inv.vatCents, grossCents: inv.grossCents,
     paymentMethod: inv.paymentMethod,
   });
-  return { filename: `Entwurf-${inv.id.slice(0, 8)}.pdf`, data };
+  const filename = inv.number ? `${inv.number}.pdf` : `Entwurf-${inv.id.slice(0, 8)}.pdf`;
+  return { filename, data };
 }

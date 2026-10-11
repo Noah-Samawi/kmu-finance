@@ -13,14 +13,31 @@ export interface PayrollInput {
 
 export interface PayrollResult {
   grossCents: number;
+  taxGrossCents: number;
+  svGrossCents: number;
   rvCents: number;
   avCents: number;
   kvCents: number;
   pvCents: number;
+  rvAgCents: number;
+  avAgCents: number;
+  kvAgCents: number;
+  pvAgCents: number;
   wageTaxCents: number;
   soliCents: number;
   churchTaxCents: number;
+  taxDeductionCents: number;
+  svDeductionCents: number;
   netCents: number;
+  payoutCents: number;
+  employerSvCents: number;
+  employerCostCents: number;
+}
+
+/** Brutto in Cent = Arbeitsstunden × Stundenlohn (Cent/Std.). */
+export function monthlyGrossFromHours(hours: number, hourlyRateCents: number): number {
+  if (!Number.isFinite(hours) || hours <= 0 || !Number.isInteger(hourlyRateCents) || hourlyRateCents <= 0) return 0;
+  return Math.round(hours * hourlyRateCents);
 }
 
 const RV_BP = 930;
@@ -54,10 +71,17 @@ export function calculatePayslip(input: PayrollInput): PayrollResult {
   const gross = Math.max(0, Math.round(input.grossCents));
   const rvBase = Math.min(gross, BBG_RV_MONTH);
   const kvBase = Math.min(gross, BBG_KV_MONTH);
+  const extra = Math.max(0, input.kvAdditionalBp);
+  const extraAn = Math.round(extra / 2);
+  const extraAg = extra - extraAn;
   const rvCents = bpOf(rvBase, RV_BP);
   const avCents = bpOf(rvBase, AV_BP);
-  const kvCents = bpOf(kvBase, KV_BASE_BP + Math.max(0, input.kvAdditionalBp));
+  const kvCents = bpOf(kvBase, KV_BASE_BP + extraAn);
   const pvCents = bpOf(kvBase, PV_BP);
+  const rvAgCents = rvCents;
+  const avAgCents = avCents;
+  const kvAgCents = bpOf(kvBase, KV_BASE_BP + extraAg);
+  const pvAgCents = pvCents;
   const svEmployee = rvCents + avCents + kvCents + pvCents;
 
   const annualGross = (gross * 12) / 100;
@@ -69,9 +93,18 @@ export function calculatePayslip(input: PayrollInput): PayrollResult {
   const soliCents = wageTaxCents * 12 > 1813800 ? roundHalfAway(wageTaxCents * 0.055) : 0;
   const churchRate = input.churchTax === "NINE" ? 900 : input.churchTax === "EIGHT" ? 800 : 0;
   const churchTaxCents = churchRate ? bpOf(wageTaxCents, churchRate) : 0;
-  const netCents = gross - svEmployee - wageTaxCents - soliCents - churchTaxCents;
+  const taxDeductionCents = wageTaxCents + soliCents + churchTaxCents;
+  const netCents = Math.max(0, gross - svEmployee - taxDeductionCents);
+  const employerSvCents = rvAgCents + avAgCents + kvAgCents + pvAgCents;
   return {
-    grossCents: gross, rvCents, avCents, kvCents, pvCents,
-    wageTaxCents, soliCents, churchTaxCents, netCents: Math.max(0, netCents),
+    grossCents: gross,
+    taxGrossCents: gross,
+    svGrossCents: kvBase,
+    rvCents, avCents, kvCents, pvCents,
+    rvAgCents, avAgCents, kvAgCents, pvAgCents,
+    wageTaxCents, soliCents, churchTaxCents,
+    taxDeductionCents, svDeductionCents: svEmployee,
+    netCents, payoutCents: netCents,
+    employerSvCents, employerCostCents: gross + employerSvCents,
   };
 }

@@ -32,25 +32,36 @@ const qtyFmt = (q: string) => Number(q).toLocaleString("de-DE", { maximumFractio
 export async function renderInvoicePdf(d: InvoicePdfData): Promise<Uint8Array> {
   const w = await PdfWriter.create();
   const right = A4.w - MARGIN;
+  const contentW = A4.w - 2 * MARGIN;
 
+  let logoBottom = A4.h - 36;
   if (d.issuer.logoKey?.startsWith("data:image")) {
     try {
       const img = await w.embedImage(d.issuer.logoKey);
-      const h = 42;
-      const scale = h / img.height;
-      w.page.drawImage(img, { x: MARGIN, y: A4.h - MARGIN - h + 8, width: img.width * scale, height: h });
-      w.y = A4.h - MARGIN - h - 6;
+      const maxH = 48;
+      const maxW = 130;
+      const scale = Math.min(maxH / img.height, maxW / img.width);
+      const iw = img.width * scale;
+      const ih = img.height * scale;
+      w.page.drawImage(img, { x: right - iw, y: A4.h - 36 - ih, width: iw, height: ih });
+      logoBottom = A4.h - 36 - ih;
     } catch { /* Logo optional */ }
   }
 
-  w.line(`${d.issuer.legalName} · ${d.issuer.street} · ${d.issuer.zip} ${d.issuer.city}`, { size: 7, color: [0.4, 0.4, 0.45] });
-  w.y -= 6;
+  w.y = A4.h - 40;
+  w.line(d.issuer.legalName, { size: 11, bold: true });
+  w.line(d.issuer.street, { size: 9 });
+  w.line(`${d.issuer.zip} ${d.issuer.city}`, { size: 9 });
+
+  w.y = Math.min(w.y, logoBottom) - 10;
+  const sender = `${d.issuer.legalName} · ${d.issuer.street} · ${d.issuer.zip} ${d.issuer.city}`;
+  w.line(sender, { size: 7, color: [0.4, 0.4, 0.45] });
+  w.y -= 4;
   w.line(d.recipient.name, { size: 11, bold: true });
   if (d.recipient.street) w.line(d.recipient.street, { size: 11 });
   if (d.recipient.zip || d.recipient.city) w.line(`${d.recipient.zip ?? ""} ${d.recipient.city ?? ""}`.trim(), { size: 11 });
   if (d.recipient.vatId) w.line(`USt-IdNr.: ${d.recipient.vatId}`, { size: 9 });
 
-  const metaTop = A4.h - MARGIN - 10;
   const payLabel = d.paymentMethod === "CASH" ? "Barzahlung" : "Überweisung";
   const meta: [string, string][] = [
     ["Rechnungsnr.", d.number ?? "– (Entwurf)"],
@@ -60,16 +71,16 @@ export async function renderInvoicePdf(d: InvoicePdfData): Promise<Uint8Array> {
   if (!d.isCancellation) meta.push(["Fällig am", fmtDate(d.dueDate)]);
   meta.push(["Zahlungsart", payLabel]);
   const saveY = w.y;
-  w.y = metaTop;
+  w.y = Math.min(logoBottom, A4.h - 90) - 8;
   for (const [k, v] of meta) {
-    w.text(k, { x: 360, size: 9, color: [0.4, 0.4, 0.45] });
-    w.text(v, { x: 360, size: 9, bold: true, align: "right", width: right - 360 });
-    w.y -= 14;
+    w.text(k, { x: 360, size: 8, color: [0.4, 0.4, 0.45] });
+    w.text(v, { x: 360, size: 8, bold: true, align: "right", width: right - 360 });
+    w.y -= 12;
   }
-  w.y = Math.min(saveY, w.y) - 30;
+  w.y = Math.min(saveY, w.y) - 18;
 
   const title = d.isCancellation ? "Stornorechnung" : "Rechnung";
-  w.line(d.isDraft ? `${title} – ENTWURF` : `${title} ${d.number}`, { size: 18, bold: true });
+  w.line(d.isDraft ? `${title} – ENTWURF` : `${title} ${d.number}`, { size: 16, bold: true });
   if (d.isCancellation && d.cancelsNumber) w.line(`Storno zur Rechnung ${d.cancelsNumber}`, { size: 10 });
   w.y -= 8;
 
@@ -105,29 +116,30 @@ export async function renderInvoicePdf(d: InvoicePdfData): Promise<Uint8Array> {
   w.y -= 10;
 
   if (d.issuer.smallBusiness) {
-    w.paragraph("Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.", A4.w - 2 * MARGIN, { size: 9 });
+    w.paragraph("Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.", contentW, { size: 9 });
   }
   if (!d.isCancellation && !d.isDraft && d.dueDate) {
     if (d.paymentMethod === "CASH") {
-      w.paragraph(`Bitte zahlen Sie ${formatCents(d.grossCents)} bar bis zum ${fmtDate(d.dueDate)} unter Angabe der Rechnungsnummer ${d.number}.`, A4.w - 2 * MARGIN, { size: 9 });
+      w.paragraph(`Bitte zahlen Sie ${formatCents(d.grossCents)} bar bis zum ${fmtDate(d.dueDate)} unter Angabe der Rechnungsnummer ${d.number}.`, contentW, { size: 9 });
     } else {
       w.paragraph(
         `Bitte überweisen Sie ${formatCents(d.grossCents)} bis zum ${fmtDate(d.dueDate)} unter Angabe der Rechnungsnummer ${d.number}.`,
-        A4.w - 2 * MARGIN, { size: 9 },
+        contentW, { size: 9 },
       );
     }
   }
   if (d.notes) {
     w.y -= 4;
-    w.paragraph(d.notes, A4.w - 2 * MARGIN, { size: 9 });
-  }
-  if (d.issuer.invoiceFooter) {
-    w.y -= 8;
-    w.paragraph(d.issuer.invoiceFooter, A4.w - 2 * MARGIN, { size: 8 });
+    w.paragraph(d.notes, contentW, { size: 9 });
   }
 
-  const bank = [d.issuer.iban && `IBAN ${d.issuer.iban}`, d.issuer.bic && `BIC ${d.issuer.bic}`].filter(Boolean).join(" · ");
   const tax = [d.issuer.taxNumber && `St.-Nr. ${d.issuer.taxNumber}`, d.issuer.vatId && `USt-IdNr. ${d.issuer.vatId}`].filter(Boolean).join(" · ");
-  w.footerOnAllPages([d.issuer.legalName, tax, bank].filter(Boolean).join("   ·   "));
+  const bank = [d.issuer.iban && `IBAN ${d.issuer.iban}`, d.issuer.bic && `BIC ${d.issuer.bic}`].filter(Boolean).join(" · ");
+  const footerLines = [
+    `${d.issuer.legalName} · ${d.issuer.street} · ${d.issuer.zip} ${d.issuer.city}`,
+    [tax, bank].filter(Boolean).join(" · "),
+    d.issuer.invoiceFooter?.replace(/\s+/g, " ").trim() ?? "",
+  ].filter(Boolean);
+  w.footerOnAllPages("", footerLines);
   return w.save();
 }

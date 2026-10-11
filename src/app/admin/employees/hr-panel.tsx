@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { btn, cx, Field, inputCls } from "@/components/ui";
 import { ErrorNote, useApi } from "@/components/use-api";
-import { formatCents } from "@/domain/money";
+import { monthlyGrossFromHours } from "@/domain/payroll";
+import { centsToPlain, formatCents, parseEuroToCents } from "@/domain/money";
 
 const KINDS = [
   { id: "ID", label: "Ausweis / Pass" },
@@ -12,6 +14,11 @@ const KINDS = [
   { id: "PAYSLIP", label: "Abrechnung" },
   { id: "OTHER", label: "Sonstiges" },
 ];
+
+function hoursNumber(s: string): number {
+  const n = Number(s.trim().replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
 
 export function HrPanel({ employeeId, profile, documents, payslips }: {
   employeeId: string;
@@ -28,15 +35,35 @@ export function HrPanel({ employeeId, profile, documents, payslips }: {
     return typeof v === "string" || typeof v === "number" ? String(v) : "";
   };
 
+  const [hourlyRate, setHourlyRate] = useState(
+    typeof p.hourlyRateCents === "number" && p.hourlyRateCents ? centsToPlain(p.hourlyRateCents) : "",
+  );
+  const [hoursPerMonth, setHoursPerMonth] = useState(d("hoursPerMonth"));
+
+  const grossCents = useMemo(() => {
+    try {
+      const rate = hourlyRate.trim() ? parseEuroToCents(hourlyRate) : 0;
+      return monthlyGrossFromHours(hoursNumber(hoursPerMonth), rate);
+    } catch {
+      return 0;
+    }
+  }, [hourlyRate, hoursPerMonth]);
+
   return (
     <div className="space-y-8">
       <form className="grid gap-3 sm:grid-cols-2" onSubmit={async (e) => {
         e.preventDefault();
         const f = Object.fromEntries(new FormData(e.currentTarget));
-        await call("PUT", `/api/v1/employees/${employeeId}/hr`, f);
+        await call("PUT", `/api/v1/employees/${employeeId}/hr`, {
+          ...f,
+          hourlyRateCents: hourlyRate,
+          hoursPerMonth,
+          monthlyGrossCents: centsToPlain(grossCents),
+        });
       }}>
         <Field label="Tätigkeit"><input name="jobTitle" defaultValue={d("jobTitle")} className={inputCls} /></Field>
         <Field label="Eintritt"><input name="startDate" type="date" defaultValue={d("startDate")} className={inputCls} /></Field>
+        <Field label="Geburtsdatum"><input name="dateOfBirth" type="date" defaultValue={d("dateOfBirth")} className={inputCls} /></Field>
         <Field label="Straße"><input name="street" defaultValue={d("street")} className={inputCls} /></Field>
         <Field label="PLZ / Ort" className="grid grid-cols-[100px_1fr] gap-2">
           <input name="zip" defaultValue={d("zip")} className={inputCls} />
@@ -59,9 +86,21 @@ export function HrPanel({ employeeId, profile, documents, payslips }: {
         </Field>
         <Field label="Krankenkasse"><input name="healthInsuranceName" defaultValue={d("healthInsuranceName")} className={inputCls} dir="auto" /></Field>
         <Field label="KV-Zusatzbeitrag (BP)" hint="250 = 2,50 %"><input name="kvAdditionalBp" type="number" defaultValue={d("kvAdditionalBp") || "250"} className={inputCls} /></Field>
-        <Field label="Stundenlohn (€/Std.)"><input name="hourlyRateCents" defaultValue={typeof p.hourlyRateCents === "number" && p.hourlyRateCents ? (p.hourlyRateCents / 100).toFixed(2).replace(".", ",") : ""} className={inputCls} /></Field>
-        <Field label="Arbeitsstunden / Monat"><input name="hoursPerMonth" defaultValue={d("hoursPerMonth")} className={inputCls} placeholder="z. B. 160" /></Field>
-        <Field label="Brutto / Monat" hint="Wird aus Stunden × Lohn berechnet, wenn leer"><input name="monthlyGrossCents" defaultValue={typeof p.monthlyGrossCents === "number" ? (p.monthlyGrossCents / 100).toFixed(2).replace(".", ",") : ""} className={inputCls} /></Field>
+        <Field label="Stundenlohn (€/Std.)">
+          <input name="hourlyRateCents" value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} inputMode="decimal" placeholder="0,00" className={inputCls} />
+        </Field>
+        <Field label="Arbeitsstunden / Monat">
+          <input name="hoursPerMonth" value={hoursPerMonth} onChange={(e) => setHoursPerMonth(e.target.value)} inputMode="decimal" placeholder="z. B. 160" className={inputCls} />
+        </Field>
+        <Field label="Brutto / Monat" hint="Stundenlohn × Arbeitsstunden, automatisch">
+          <input
+            readOnly
+            tabIndex={-1}
+            value={grossCents ? formatCents(grossCents) : ""}
+            className={cx(inputCls, "bg-paper text-muted")}
+            placeholder="wird berechnet"
+          />
+        </Field>
         <Field label="IBAN"><input name="iban" defaultValue={d("iban")} className={inputCls} /></Field>
         <Field label="Notizen" className="sm:col-span-2"><textarea name="notes" defaultValue={d("notes")} rows={2} className={cx(inputCls, "h-auto py-2")} dir="auto" /></Field>
         <div className="sm:col-span-2"><button disabled={busy} className={cx(btn.base, btn.primary)}>Personalakte speichern</button></div>
@@ -81,10 +120,10 @@ export function HrPanel({ employeeId, profile, documents, payslips }: {
         <button disabled={busy} className={cx(btn.base, btn.secondary, btn.sm)}>Hochladen</button>
       </form>
       <ul className="divide-y divide-line text-sm">
-        {documents.map((d) => (
-          <li key={d.id} className="flex justify-between gap-2 py-2">
-            <span dir="auto">{d.title}</span>
-            <a className="text-ledger" href={`/api/v1/employees/${employeeId}/hr/documents/${d.id}/file`} target="_blank">Öffnen</a>
+        {documents.map((doc) => (
+          <li key={doc.id} className="flex justify-between gap-2 py-2">
+            <span dir="auto">{doc.title}</span>
+            <a className="text-ledger" href={`/api/v1/employees/${employeeId}/hr/documents/${doc.id}/file`} target="_blank">Öffnen</a>
           </li>
         ))}
       </ul>
@@ -96,8 +135,8 @@ export function HrPanel({ employeeId, profile, documents, payslips }: {
       }}>
         <Field label="Jahr"><input name="year" type="number" required defaultValue={new Date().getFullYear()} className={inputCls} /></Field>
         <Field label="Monat"><input name="month" type="number" min={1} max={12} required defaultValue={new Date().getMonth() + 1} className={inputCls} /></Field>
-        <Field label="Stunden"><input name="hoursWorked" inputMode="decimal" placeholder={d("hoursPerMonth") || "Stunden"} className={inputCls} /></Field>
-        <Field label="€/Std."><input name="hourlyRateCents" placeholder={typeof p.hourlyRateCents === "number" && p.hourlyRateCents ? String(p.hourlyRateCents / 100) : ""} className={inputCls} /></Field>
+        <Field label="Stunden"><input name="hoursWorked" inputMode="decimal" placeholder={hoursPerMonth || "Stunden"} className={inputCls} /></Field>
+        <Field label="€/Std."><input name="hourlyRateCents" placeholder={hourlyRate || ""} className={inputCls} /></Field>
         <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Lohnabrechnung erstellen</button>
       </form>
       <ul className="divide-y divide-line text-sm">

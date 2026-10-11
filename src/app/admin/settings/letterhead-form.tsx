@@ -56,8 +56,8 @@ export function LetterheadForm({ tenant }: { tenant: {
           <img src={logo} alt="Logo" className="mt-2 h-16 object-contain" />
         )}
       </Field>
-      <Field label="Fußtext auf Rechnungen" className="sm:col-span-2">
-        <textarea name="invoiceFooter" defaultValue={tenant.invoiceFooter ?? ""} rows={3} className={cx(inputCls, "h-auto py-2")} />
+      <Field label="Fußtext auf Rechnungen" hint="z. B. Handelsregister, Geschäftsführer – erscheint in der Fußzeile jeder Rechnung" className="sm:col-span-2">
+        <textarea name="invoiceFooter" defaultValue={tenant.invoiceFooter ?? ""} rows={3} className={cx(inputCls, "h-auto py-2")} placeholder="Amtsgericht … HRB … · Geschäftsführer …" />
       </Field>
       <ErrorNote error={error} />
       <div className="sm:col-span-2"><button disabled={busy} className={cx(btn.base, btn.primary)}>Speichern</button></div>

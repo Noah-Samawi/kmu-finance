@@ -79,6 +79,12 @@ describe("payroll & bank match", () => {
     const r = calculatePayslip({ grossCents: 300000, taxClass: 1, childAllowances: 0, churchTax: "NONE", kvAdditionalBp: 250 });
     expect(r.netCents).toBeGreaterThan(0);
     expect(r.netCents).toBeLessThan(r.grossCents);
+    expect(r.payoutCents).toBe(r.netCents);
+    expect(r.employerCostCents).toBe(r.grossCents + r.employerSvCents);
+    expect(r.taxDeductionCents).toBe(r.wageTaxCents + r.soliCents + r.churchTaxCents);
+    const { monthlyGrossFromHours } = await import("@/domain/payroll");
+    expect(monthlyGrossFromHours(160, 1500)).toBe(240000);
+    expect(monthlyGrossFromHours(0, 1500)).toBe(0);
   });
   it("erkennt Geldautomaten und CSV", async () => {
     const { isCashWithdrawal, parseBankCsv, matchBankLine } = await import("@/domain/reconcile");

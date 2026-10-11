@@ -124,12 +124,33 @@ export class PdfWriter {
     }
   }
 
-  footerOnAllPages(text: string) {
+  footerOnAllPages(text: string, extraLines: string[] = []) {
     const pages = this.doc.getPages();
     pages.forEach((p, i) => {
-      const t = this.clean(`${text}   ·   Seite ${i + 1} / ${pages.length}`);
-      p.drawText(t, { x: MARGIN, y: 25, size: 7, font: this.font, color: rgb(0.45, 0.45, 0.5) });
+      const lines = extraLines.length
+        ? [...extraLines, `Seite ${i + 1} / ${pages.length}`]
+        : [`${text}   ·   Seite ${i + 1} / ${pages.length}`];
+      p.drawLine({
+        start: { x: MARGIN, y: 22 + lines.length * 9 },
+        end: { x: A4.w - MARGIN, y: 22 + lines.length * 9 },
+        thickness: 0.4, color: rgb(0.7, 0.7, 0.73),
+      });
+      lines.forEach((line, li) => {
+        const t = this.clean(line);
+        p.drawText(t, {
+          x: MARGIN, y: 18 + (lines.length - 1 - li) * 9,
+          size: 6.5, font: this.font, color: rgb(0.35, 0.35, 0.4),
+        });
+      });
     });
+  }
+
+  fillRect(x: number, y: number, width: number, height: number, color: [number, number, number]) {
+    this.page.drawRectangle({ x, y, width, height, color: rgb(...color) });
+  }
+
+  strokeRect(x: number, y: number, width: number, height: number, thickness = 0.8) {
+    this.page.drawRectangle({ x, y, width, height, borderColor: rgb(0.2, 0.2, 0.22), borderWidth: thickness, color: rgb(1, 1, 1) });
   }
 
   async embedImage(dataUrlOrBytes: string | Uint8Array) {
