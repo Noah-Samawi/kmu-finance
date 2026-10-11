@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { listPartners } from "@/application/partners/partners";
@@ -25,12 +26,14 @@ export default async function PartnersPage() {
                       <p className="font-medium">{p.name}{!p.isActive && <Pill tone="red">gesperrt</Pill>}</p>
                       <p className="text-sm text-muted">{p.email}</p>
                       <p className="text-xs text-muted">Berichte {p.canViewReports ? "ja" : "nein"} · Bank {p.canViewBank ? "ja" : "nein"}</p>
+                      <Link href={`/admin/reports/${p.id}`} className="text-sm font-medium text-ledger">Einzelbericht / Monatsbericht →</Link>
                     </div>
                     <dl className="grid grid-cols-3 gap-4 text-right">
                       <div><dt className="text-xs text-muted">Kapitalkonto</dt><dd><Money cents={p.capitalCents} className="font-semibold" /></dd></div>
                       <div>
-                        <dt className="text-xs text-muted">Vorgelegtes Geld offen</dt>
+                        <dt className="text-xs text-muted">Auslagenkonto – Firma schuldet</dt>
                         <dd><Money cents={p.outlayOpenCents} className={p.outlayOpenCents > 0 ? "font-semibold text-amber-700" : "font-semibold"} /></dd>
+                        {p.outlayOpenCents > 0 && <dd className="text-xs text-amber-700">Verbindlichkeit der Firma <Money cents={-p.outlayOpenCents} /></dd>}
                       </div>
                       <div><dt className="text-xs text-muted">Budget / Vorschuss</dt><dd><Money cents={p.budgetCents} className="font-semibold" /></dd></div>
                     </dl>

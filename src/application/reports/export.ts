@@ -1,7 +1,8 @@
 // Modul D: Export für den Steuerberater (CSV + PDF)
-import { eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import type { Tx } from "@/infrastructure/db/client";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
-import { tenants } from "@/infrastructure/db/schema";
+import { tenants, users } from "@/infrastructure/db/schema";
 import { PdfWriter, A4, MARGIN } from "@/infrastructure/pdf/pdf-kit";
 import { LEDGER_LABEL } from "@/domain/ledger";
 import { centsToPlain, formatCents } from "@/domain/money";
@@ -10,7 +11,11 @@ import { forbidden } from "@/domain/errors";
 import { requireRole, tid, type Ctx } from "../context";
 import { buildSummary, ledgerRows, rangeFromDays, type LedgerRow, type Summary } from "./reports";
 import { partnerBookingRows, type PartnerBookingRow } from "../partners/partner-bookings";
-import { FUNDING_LABEL, PARTNER_KIND_LABEL, REFUND_STATUS_LABEL } from "@/domain/partner";
+import { FUNDING_LABEL, PARTNER_KIND_LABEL } from "@/domain/partner";
+import type { PersonRole } from "@/domain/person-report";
+import { buildPersonReportTx, drawPersonReport, partnerStatusText, type FullPersonReport } from "./person-report";
+
+export { partnerBookingTableRows, partnerStatusText } from "./person-report";
 
 function typeLabel(r: LedgerRow) {
   return r.type === "REVERSAL" && r.reversedType ? `Storno ${LEDGER_LABEL[r.reversedType]}` : LEDGER_LABEL[r.type];
@@ -41,36 +46,12 @@ export function toCsv(rows: LedgerRow[], partnerBookings: PartnerBookingRow[] = 
   return "﻿" + [header.join(";"), ...lines, ...partnerBlock].join("\r\n") + "\r\n";
 }
 
-export function partnerStatusText(b: PartnerBookingRow): string {
-  if (b.reversed) return "storniert";
-  if (b.kind === "OUTLAY_REFUND") {
-    return b.settles.length
-      ? `tilgt: ${b.settles.map((x) => `${fmtDate(x.bookingDate)} ${x.purpose} (${formatCents(x.amountCents)})`).join("; ")}`
-      : "Erstattung";
-  }
-  if (b.status) {
-    const base = REFUND_STATUS_LABEL[b.status];
-    if (b.status === "REFUNDED") return "durch Admin erstattet";
-    return b.status === "PARTIAL" ? `${base}, offen ${formatCents(b.openCents)}` : `${base} (${formatCents(b.openCents)})`;
-  }
-  if (b.kind === "OUTLAY") return "Firmenmittel – keine Erstattung";
-  return "gebucht";
-}
-
-export function partnerBookingTableRows(bookings: PartnerBookingRow[]): string[][] {
-  return [...bookings].reverse().map((b) => [
-    fmtDate(b.bookingDate),
-    b.partnerName,
-    PARTNER_KIND_LABEL[b.kind],
-    b.source ? FUNDING_LABEL[b.source] : "–",
-    formatCents(b.amountCents),
-    `${b.purpose}${b.hasReceipt ? " · Beleg" : " · ohne Beleg"}${b.selfEntered ? "" : ` · erfasst von ${b.createdByName}`}`,
-    partnerStatusText(b),
-  ]);
-}
-
+/**
+ * Firmenbericht: Kasse/Bank, Pool, Ausgaben, Journal – danach je Person ein eigener
+ * Einzelbericht auf eigener Seite (keine Sammeltabellen über mehrere Personen).
+ */
 export async function renderReportPdf(
-  tenantName: string, s: Summary, rows: LedgerRow[], title: string, employeeView: boolean, partnerBookings: PartnerBookingRow[] = [],
+  tenantName: string, s: Summary, rows: LedgerRow[], title: string, employeeView: boolean, persons: FullPersonReport[] = [],
 ) {
   const w = await PdfWriter.create();
   const width = A4.w - 2 * MARGIN;
@@ -78,7 +59,12 @@ export async function renderReportPdf(
   w.line(`${tenantName}   ·   Zeitraum ${fmtDate(new Date(s.from + "T12:00:00Z"))} – ${fmtDate(new Date(s.to + "T12:00:00Z"))}`, { size: 9 });
   w.hr();
 
-  if (!employeeView) {
+  if (employeeView) {
+    persons.forEach((p, i) => drawPersonReport(w, p, { newPage: i > 0 }));
+    w.footerOnAllPages(`${tenantName} · ${title} · erstellt ${fmtDateTime(new Date())}`);
+    return w.save();
+  }
+  {
     w.line("Saldo-Übertrag (Anfangssaldo = Endsaldo der Vorperiode)", { size: 11, bold: true });
     w.tableOpen(
       [
@@ -91,7 +77,7 @@ export async function renderReportPdf(
         ["Bankkonto", formatCents(s.bank.openingCents), formatCents(s.bank.closingCents)],
       ],
     );
-    w.y -= 8;
+    w.y -= 18;
     w.line("Einnahmen-Pool (Summe)", { size: 11, bold: true });
     w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
       ["Anfangsbestand", formatCents(s.pool.openingCents)],
@@ -106,65 +92,19 @@ export async function renderReportPdf(
     w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
       ["Belegte Ausgaben", formatCents(s.totals.receiptsCents)],
       ["Manuelle Ausgleiche (ohne Beleg)", formatCents(s.totals.adjustmentsCents)],
-      ["Offene Mitarbeiter-Budgets (Ende)", formatCents(s.totals.walletsOpenCents)],
-      ["Offene Auslagen-Ansprüche (Ende)", formatCents(s.totals.claimsOpenCents)],
     ]);
     w.y -= 8;
+    w.paragraph(
+      `Personenkonten (Budget, Auslagen, Kapital) stehen in den Einzelberichten ab Seite 2 – je Person ein eigener Bericht${persons.length ? `: ${persons.map((p) => p.person.name).join(", ")}` : ""}.`,
+      width, { size: 8.5 },
+    );
+    w.y -= 4;
   }
 
-  w.line(employeeView ? "Mein Konto" : "Mitarbeiterkonten (Budget und Auslagen)", { size: 11, bold: true });
-  w.table(
-    [
-      { title: "Mitarbeiter", width: 90 }, { title: "Budget Anfang", width: 62, align: "right" },
-      { title: "Erhalten", width: 54, align: "right" }, { title: "Belege", width: 50, align: "right" },
-      { title: "Budget Ende", width: 62, align: "right" }, { title: "Anspruch", width: 62, align: "right" },
-      { title: "Saldo vs. Firma", width: width - 380, align: "right" },
-    ],
-    s.employees.map((e) => [e.name, formatCents(e.openingCents), formatCents(e.allocatedCents), formatCents(e.receiptsCents),
-      formatCents(e.closingCents), formatCents(e.claimClosingCents), formatCents(e.firmBalanceCents)]),
-    8,
-  );
-  if (s.partners?.length) {
-    w.y -= 8;
-    w.line("Gesellschafter: Vorgelegtes Geld (Auslagen) und Budget – getrennt vom Kapitalkonto", { size: 11, bold: true });
-    w.table(
-      [
-        { title: "Gesellschafter", width: 110 }, { title: "Auslagen Anfang", width: 70, align: "right" },
-        { title: "+ Vorgelegt", width: 62, align: "right" }, { title: "– Erstattet", width: 62, align: "right" },
-        { title: "Offen Ende", width: 66, align: "right" }, { title: "Budget Ende", width: 62, align: "right" },
-        { title: "Firmenmittel", width: width - 432, align: "right" },
-      ],
-      s.partners.map((p) => [p.name, formatCents(p.outlayOpeningCents), formatCents(p.outlayCents), formatCents(p.refundCents),
-        formatCents(p.outlayClosingCents), formatCents(p.budgetClosingCents), formatCents(p.expenseCents)]),
-      8,
-    );
-    w.y -= 8;
-    w.line("Gesellschafter-Kapitalkonten", { size: 11, bold: true });
-    w.table(
-      [
-        { title: "Gesellschafter", width: 140 }, { title: "Übertrag", width: 80, align: "right" },
-        { title: "Einlagen", width: 80, align: "right" }, { title: "Entnahmen", width: 80, align: "right" },
-        { title: "Gewinn", width: 70, align: "right" }, { title: "Ende", width: width - 450, align: "right" },
-      ],
-      s.partners.map((p) => [p.name, formatCents(p.openingCents), formatCents(p.depositCents), formatCents(p.drawCents), formatCents(p.profitCents), formatCents(p.closingCents)]),
-      8,
-    );
-  }
-  if (partnerBookings.length) {
-    w.y -= 8;
-    w.line(`Gesellschafter-Buchungen (${partnerBookings.length}) – Mittelherkunft, Zweck und Erstattungsstatus`, { size: 11, bold: true });
-    w.tableOpen(
-      [
-        { title: "Datum", width: 50 }, { title: "Person", width: 56 }, { title: "Vorgang", width: 86 },
-        { title: "Herkunft / Konto", width: 62 }, { title: "Betrag", width: 54, align: "right" },
-        { title: "Wofür? / Begründung", width: 100 }, { title: "Status", width: width - 408 },
-      ],
-      partnerBookingTableRows(partnerBookings),
-      7.5,
-    );
-  }
+  const journal = rows.filter((r) => r.cashDeltaCents || r.bankDeltaCents);
   w.y -= 8;
-  w.line(`Einzelbuchungen (${rows.length})`, { size: 11, bold: true });
+  w.line(`Journal Kasse / Bank (${journal.length} Bewegungen)`, { size: 11, bold: true });
+  w.line("Nur Geldbewegungen der Firmenkonten – Budget-, Beleg- und Auslagenbuchungen je Person stehen im Einzelbericht.", { size: 8 });
   w.table(
     [
       { title: "Datum", width: 62 }, { title: "Art", width: 88 }, { title: "Person", width: 70 },
@@ -172,7 +112,7 @@ export async function renderReportPdf(
       { title: "Kasse", width: 52, align: "right" as const },
       { title: "Bank", width: 52, align: "right" as const },
     ],
-    [...rows].reverse().map((r) => [
+    [...journal].reverse().map((r) => [
       fmtDateTime(r.bookingDate), typeLabel(r), r.employeeName ?? "–",
       r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Bar" : "",
       [r.description, r.invoiceNumber].filter(Boolean).join(" · "),
@@ -181,6 +121,7 @@ export async function renderReportPdf(
     ]),
     8,
   );
+  persons.forEach((p) => drawPersonReport(w, p, { newPage: true }));
   w.footerOnAllPages(`${tenantName} · ${title} · erstellt ${fmtDateTime(new Date())}`);
   return w.save();
 }
@@ -191,12 +132,13 @@ export async function exportReport(ctx: Ctx, format: "csv" | "pdf", from: string
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
   const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
-  const { rows, summary, tenantName, partnerBookings } = await withTenant(ctx, async (tx) => ({
+  const { rows, summary, tenantName, partnerBookings, persons } = await withTenant(ctx, async (tx) => ({
     rows: await ledgerRows(tx, tenantId, { range, employeeId: only, limit: 100_000 }),
     summary: await buildSummary(tx, tenantId, range, from, to, only),
     partnerBookings: ctx.role === "EMPLOYEE" || (only && ctx.role === "ADMIN")
       ? []
       : await partnerBookingRows(tx, tenantId, { range, partnerId: only }),
+    persons: await personsFor(tx, tenantId, only, from, to),
     tenantName: (await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { name: true } }))!.name,
   }));
   const base = `protokoll_${from}_${to}`;
@@ -204,6 +146,18 @@ export async function exportReport(ctx: Ctx, format: "csv" | "pdf", from: string
     return { filename: `${base}.csv`, mime: "text/csv; charset=utf-8", data: Buffer.from(toCsv(rows, partnerBookings), "utf-8") };
   }
   const title = ctx.role === "EMPLOYEE" ? `Kontoprotokoll ${ctx.name}` : "Einnahmen- & Ausgabenprotokoll";
-  const data = await renderReportPdf(tenantName, summary, rows, title, ctx.role === "EMPLOYEE", partnerBookings);
+  const data = await renderReportPdf(tenantName, summary, rows, title, ctx.role === "EMPLOYEE", persons);
   return { filename: `${base}.pdf`, mime: "application/pdf", data: Buffer.from(data) };
+}
+
+async function personsFor(tx: Tx, tenantId: string, only: string | undefined, from: string, to: string) {
+  const people = await tx.select({ id: users.id, name: users.name, role: users.role }).from(users)
+    .where(and(
+      eq(users.tenantId, tenantId), inArray(users.role, ["EMPLOYEE", "PARTNER"]),
+      only ? eq(users.id, only) : undefined,
+    ))
+    .orderBy(asc(users.role), asc(users.name));
+  const out: FullPersonReport[] = [];
+  for (const p of people) out.push(await buildPersonReportTx(tx, tenantId, { ...p, role: p.role as PersonRole }, from, to));
+  return out;
 }

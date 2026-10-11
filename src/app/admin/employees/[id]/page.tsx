@@ -1,9 +1,10 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { getEmployee } from "@/application/employees/employees";
 import { poolOverview } from "@/application/pool/pool";
 import { getSummary } from "@/application/reports/reports";
-import { PageHeader, Pill, Section } from "@/components/ui";
+import { btn, cx, PageHeader, Pill, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { formatCents } from "@/domain/money";
 import { monthKey, todayKey } from "@/domain/period";
@@ -26,7 +27,8 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
 
   return (
     <>
-      <PageHeader title={emp.name} subtitle={<span className="inline-flex items-center gap-2">{emp.email}{!emp.isActive && <Pill tone="red">gesperrt</Pill>}</span>} />
+      <PageHeader title={emp.name} subtitle={<span className="inline-flex items-center gap-2">{emp.email}{!emp.isActive && <Pill tone="red">gesperrt</Pill>}</span>}
+        actions={<Link href={`/admin/reports/${emp.id}`} className={cx(btn.base, btn.secondary)}>Einzelbericht / Monatsbericht</Link>} />
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
           <Section>
@@ -34,7 +36,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
               <div>
                 <p className="text-sm text-muted">Firmenbudget beim Mitarbeiter</p>
                 <p className="text-4xl font-semibold tracking-tight tabular">{formatCents(emp.balanceCents)}</p>
-                <p className="mt-2 text-sm">Auslagen-Anspruch: <span className="font-semibold tabular">{formatCents(emp.claimCents)}</span>
+                <p className="mt-2 text-sm">Auslagenkonto (Firma schuldet {emp.name}): <span className="font-semibold tabular">{formatCents(emp.claimCents)}</span>
                   {" · "}Saldo vs. Firma: <span className="font-semibold tabular">{formatCents(emp.firmBalanceCents)}</span> <span className="text-muted">(plus = Firma schuldet MA)</span></p>
               </div>
               {m && (

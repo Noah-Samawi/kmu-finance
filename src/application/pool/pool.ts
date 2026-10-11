@@ -60,7 +60,7 @@ export async function allocateBudget(ctx: Ctx, input: z.infer<typeof allocationS
     if (avail < input.amountCents) throw insufficient(ACCOUNT_LABEL[account], avail);
     const entry = await insertEntry(tx, ctx, tenantId, {
       type: "ALLOCATION", ...deltasFor("ALLOCATION", input.amountCents, account),
-      employeeId: emp.id, description: input.description || `Budget für ${emp.name} aus ${ACCOUNT_LABEL[account]}`,
+      employeeId: emp.id, description: `${input.description} · aus ${ACCOUNT_LABEL[account]}`,
     });
     await audit(tx, ctx, "pool.allocation", "LedgerEntry", entry.id, { employeeId: emp.id, amountCents: input.amountCents, accountKind: account });
     return {

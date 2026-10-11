@@ -4,7 +4,8 @@ import { getSummary, listClosings, type Summary } from "@/application/reports/re
 import { listEmployees } from "@/application/employees/employees";
 import { btn, cx, Field, inputCls, Money, PageHeader, Section, Table, td } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
-import { PartnerBookingList } from "@/components/partner-booking-list";
+import { PersonReportCard } from "@/components/person-report-view";
+import { listPersonReports } from "@/application/reports/person-report";
 import { formatCents } from "@/domain/money";
 import { fmtDate, fmtDateTime, monthKey, todayKey } from "@/domain/period";
 import { ClosingForm } from "./closing-form";
@@ -20,9 +21,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const from = isDay(sp.from) ? sp.from! : `${monthKey()}-01`;
   const to = isDay(sp.to) ? sp.to! : today;
   const employeeId = sp.employeeId || undefined;
-  const [{ summary: s, entries, partnerBookings }, closings, employees] = await Promise.all([
-    getSummary(user, from, to, employeeId), listClosings(user), listEmployees(user),
+  const [{ summary: s, entries }, closings, employees, allPeople] = await Promise.all([
+    getSummary(user, from, to, employeeId), listClosings(user), listEmployees(user), listPersonReports(user, from, to),
   ]);
+  const people = employeeId ? allPeople.filter((p) => p.person.id === employeeId) : allPeople;
   const qs = new URLSearchParams({ from, to, ...(employeeId ? { employeeId } : {}) }).toString();
   const lm = new Date(); lm.setDate(1); lm.setMonth(lm.getMonth() - 1);
 
@@ -75,51 +77,17 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </Section>
       </div>
 
-      <Section title="Mitarbeiterkonten (Budget / Auslagen, mit Übertrag)" className="mt-6" flush>
-        <Table head={["Mitarbeiter", "Budget Anfang", "Erhalten", "Belege", "Budget Ende", "Anspruch", "Saldo vs. Firma"].map((h, i) => <span key={h} className={i ? "block text-right" : ""}>{h}</span>)}>
-          {s.employees.map((e) => (
-            <tr key={e.employeeId}>
-              <td className={td + " font-medium"}>{e.name}</td>
-              {[e.openingCents, e.allocatedCents, e.receiptsCents, e.closingCents, e.claimClosingCents, e.firmBalanceCents].map((v, i) => (
-                <td key={i} className={td + " text-right"}><Money cents={v} /></td>
-              ))}
-            </tr>
-          ))}
-        </Table>
+      <Section title="Einzelberichte je Person" className="mt-6">
+        <p className="-mt-2 mb-4 text-sm text-muted">
+          Jede Person hat einen eigenen Bericht mit Anfangsbestand, Einnahmen, Ausgaben, Restbetrag, Rückgaben an die Firma
+          und allen Transfers aus Kasse/Bank – keine gemeinsame Sammeltabelle.
+        </p>
+        {people.length === 0 ? <p className="text-sm text-muted">Noch keine Mitarbeiter oder Gesellschafter.</p> : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {people.map((r) => <PersonReportCard key={r.person.id} r={r} href={`/admin/reports/${r.person.id}?from=${from}&to=${to}`} />)}
+          </div>
+        )}
       </Section>
-      {s.partners?.length > 0 && (
-        <Section title="Gesellschafter-Kapitalkonten" className="mt-6" flush>
-          <Table head={["Gesellschafter", "Übertrag", "Einlagen", "Entnahmen", "Gewinn", "Ende"].map((h, i) => <span key={h} className={i ? "block text-right" : ""}>{h}</span>)}>
-            {s.partners.map((p) => (
-              <tr key={p.partnerId}>
-                <td className={td + " font-medium"}>{p.name}</td>
-                {[p.openingCents, p.depositCents, p.drawCents, p.profitCents, p.closingCents].map((v, i) => (
-                  <td key={i} className={td + " text-right"}><Money cents={v} /></td>
-                ))}
-              </tr>
-            ))}
-          </Table>
-        </Section>
-      )}
-      {s.partners?.length > 0 && (
-        <Section title="Gesellschafter: Vorgelegtes Geld und Budget (getrennt vom Kapitalkonto)" className="mt-6" flush>
-          <Table head={["Gesellschafter", "Auslagen Anfang", "+ Vorgelegt", "– Erstattet", "Offen Ende", "Budget Ende", "Firmenmittel-Ausgaben"].map((h, i) => <span key={h} className={i ? "block text-right" : ""}>{h}</span>)}>
-            {s.partners.map((p) => (
-              <tr key={p.partnerId}>
-                <td className={td + " font-medium"}>{p.name}</td>
-                {[p.outlayOpeningCents, p.outlayCents, p.refundCents, p.outlayClosingCents, p.budgetClosingCents, p.expenseCents].map((v, i) => (
-                  <td key={i} className={td + " text-right"}><Money cents={v} /></td>
-                ))}
-              </tr>
-            ))}
-          </Table>
-        </Section>
-      )}
-      {partnerBookings.length > 0 && (
-        <Section title={`Gesellschafter-Buchungen (${partnerBookings.length}) – Herkunft, Zweck, Erstattungsstatus`} className="mt-6" flush>
-          <PartnerBookingList rows={partnerBookings} showPartner />
-        </Section>
-      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Section title={`Einzelbuchungen (${entries.length})`} flush>

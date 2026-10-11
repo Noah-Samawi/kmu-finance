@@ -91,6 +91,7 @@ export function calculatePayslip(input: PayrollInput): PayrollResult {
   const annualTax = annualIncomeTaxEuro(zv);
   const wageTaxCents = Math.max(0, roundHalfAway((annualTax / 12) * 100));
   const soliCents = wageTaxCents * 12 > 1813800 ? roundHalfAway(wageTaxCents * 0.055) : 0;
+  // Nur bei ausdrücklicher Konfession; alles andere (NONE, leer, unbekannt) = 0 % Kirchensteuer
   const churchRate = input.churchTax === "NINE" ? 900 : input.churchTax === "EIGHT" ? 800 : 0;
   const churchTaxCents = churchRate ? bpOf(wageTaxCents, churchRate) : 0;
   const taxDeductionCents = wageTaxCents + soliCents + churchTaxCents;

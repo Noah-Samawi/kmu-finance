@@ -17,7 +17,7 @@ export default async function PartnerHome() {
   const p = await getPartner(user, user.userId);
   const cards = [
     { label: t("pb.capital"), hint: t("pb.capitalHint"), cents: p.capitalCents },
-    { label: t("pb.outlay"), hint: t("pb.outlayHint"), cents: p.outlayOpenCents, accent: p.outlayOpenCents > 0 },
+    { label: t("pb.outlay"), hint: t("pb.outlayHint"), cents: p.outlayOpenCents, accent: p.outlayOpenCents > 0, firm: -p.outlayOpenCents },
     { label: t("pb.budget"), hint: t("pb.budgetHint"), cents: p.budgetCents },
   ];
   return (
@@ -27,6 +27,7 @@ export default async function PartnerHome() {
           <section key={c.label} className={`rounded-xl border bg-surface p-4 ${c.accent ? "border-amber-400" : "border-line"}`}>
             <p className="text-sm text-muted">{c.label}</p>
             <p className="mt-1 text-2xl font-semibold tabular">{formatCents(c.cents)}</p>
+            {c.firm !== undefined && c.firm !== 0 && <p className="text-xs font-medium text-amber-700">{t("pb.firmLiability")}: {formatCents(c.firm)}</p>}
             <p className="mt-1 text-xs text-muted">{c.hint}</p>
           </section>
         ))}

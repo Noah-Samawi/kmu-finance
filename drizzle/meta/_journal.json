@@ -50,6 +50,13 @@
       "when": 1792100000000,
       "tag": "0006_partner_outlays",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792200000000,
+      "tag": "0007_private_deposit_to_outlay",
+      "breakpoints": true
     }
   ]
 }

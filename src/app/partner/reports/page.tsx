@@ -1,36 +1,28 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { getSummary } from "@/application/reports/reports";
-import { PageHeader, Section } from "@/components/ui";
-import { LedgerList } from "@/components/ledger-list";
-import { PartnerBookingList } from "@/components/partner-booking-list";
-import { formatCents } from "@/domain/money";
-import { monthKey, todayKey } from "@/domain/period";
+import { getPersonReport } from "@/application/reports/person-report";
+import { btn, cx, PageHeader } from "@/components/ui";
+import { PersonReportView, pdfHref } from "@/components/person-report-view";
+import { ReportRangeForm, resolveRange } from "@/components/report-range-form";
 
-export const metadata: Metadata = { title: "Berichte" };
+export const metadata: Metadata = { title: "Mein Bericht" };
 
-export default async function PartnerReports() {
+/** Eigener Einzelbericht – Firmenbericht nur mit Berichtsrecht */
+export default async function PartnerReports({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; month?: string }> }) {
   const user = await requireUser("PARTNER");
-  if (!user.canViewReports) redirect("/partner");
-  const from = `${monthKey()}-01`;
-  const to = todayKey();
-  const { summary, entries, partnerBookings } = await getSummary(user, from, to);
+  const { from, to } = resolveRange(await searchParams);
+  const r = await getPersonReport(user, user.userId, from, to);
   return (
     <>
-      <PageHeader title="Monatsbericht" subtitle={`${from} – ${to}`}
-        actions={<a className="text-sm font-medium text-ledger" href={`/api/v1/reports/export?format=pdf&from=${from}&to=${to}`}>PDF</a>} />
-      <Section title="Kapitalkonto">
-        <p className="tabular">{summary.partners.find((p) => p.partnerId === user.userId)
-          ? `Dein Kapitalkonto Ende: ${formatCents(summary.partners.find((p) => p.partnerId === user.userId)!.closingCents)}`
-          : "Keine Kapitalbewegungen in diesem Monat"}</p>
-      </Section>
-      <Section title="Gesellschafter-Buchungen (Herkunft, Zweck, Erstattungsstatus)" flush>
-        <PartnerBookingList rows={partnerBookings} showPartner />
-      </Section>
-      <Section title="Buchungen" flush>
-        <LedgerList rows={entries} mode="both" />
-      </Section>
+      <PageHeader title="Mein Monatsbericht"
+        actions={<>
+          <a href={pdfHref(r)} className={cx(btn.base, btn.primary, btn.sm)}>Mein Bericht PDF</a>
+          {user.canViewReports && (
+            <a href={`/api/v1/reports/export?format=pdf&from=${from}&to=${to}`} className={cx(btn.base, btn.secondary, btn.sm)}>Firmenbericht PDF</a>
+          )}
+        </>} />
+      <ReportRangeForm from={from} to={to} />
+      <PersonReportView r={r} />
     </>
   );
 }

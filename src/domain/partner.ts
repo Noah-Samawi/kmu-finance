@@ -53,9 +53,10 @@ export function assertPurpose(purpose: string, hasReceipt: boolean) {
 /** Welche Mittelherkunft ist für den Vorgang zulässig? null = Vorgang ohne Geldfluss */
 export function allowedSources(kind: PartnerKind): FundingSource[] | null {
   switch (kind) {
-    case "DEPOSIT":
     case "OUTLAY":
       return ["PRIVATE", "BANK", "CASH"];
+    // Privat ausgelegtes Geld ist nie Kapital, sondern immer eine Auslage (Verbindlichkeit der Firma)
+    case "DEPOSIT":
     case "DRAW":
     case "BUDGET":
     case "BUDGET_RETURN":
@@ -71,6 +72,9 @@ export function assertSource(kind: PartnerKind, source: FundingSource | null | u
   const allowed = allowedSources(kind);
   if (allowed === null) return null;
   if (!source) throw rule("Bitte Mittelherkunft / Konto auswählen");
+  if (kind === "DEPOSIT" && source === "PRIVATE") {
+    throw rule("Privat ausgelegtes Geld erhöht nie das Kapitalkonto – bitte als „Auslage / Ausgabe für die Firma“ mit „Eigene Tasche / Privat“ erfassen");
+  }
   if (!allowed.includes(source)) {
     throw rule(`${PARTNER_KIND_LABEL[kind]}: „${FUNDING_LABEL[source]}“ ist hier nicht möglich`);
   }
@@ -93,7 +97,6 @@ function account(amount: number, source: FundingSource): Pick<Deltas, "poolDelta
  * Hauptbuch-Wirkung eines Gesellschafter-Vorgangs. amountCents ist immer positiv.
  *  - Auslage aus eigener Tasche  -> nur "Vorgelegtes Geld" +  (Firma schuldet dem Gesellschafter)
  *  - Ausgabe mit Firmenkarte/Kasse -> Bank/Kasse −, KEIN Erstattungsanspruch
- *  - Einlage privat bezahlt       -> nur Kapitalkonto + (z. B. Firmenrechnung privat beglichen)
  *  - Erstattung                   -> Bank/Kasse −, "Vorgelegtes Geld" −
  */
 export function partnerPosting(kind: PartnerKind, source: FundingSource | null, amountCents: number): { type: LedgerType; deltas: Deltas } {
@@ -102,9 +105,7 @@ export function partnerPosting(kind: PartnerKind, source: FundingSource | null, 
   const a = amountCents;
   switch (kind) {
     case "DEPOSIT":
-      return src === "PRIVATE"
-        ? { type: "PARTNER_DEPOSIT", deltas: { ...none, partnerDeltaCents: a, accountKind: null } }
-        : { type: "PARTNER_DEPOSIT", deltas: { ...none, ...account(a, src!), partnerDeltaCents: a } };
+      return { type: "PARTNER_DEPOSIT", deltas: { ...none, ...account(a, src!), partnerDeltaCents: a } };
     case "OUTLAY":
       return src === "PRIVATE"
         ? { type: "PARTNER_OUTLAY", deltas: { ...none, claimDeltaCents: a, accountKind: null } }

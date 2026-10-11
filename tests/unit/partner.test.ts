@@ -83,6 +83,14 @@ describe("Gesellschafter: Vorgelegtes Geld strikt getrennt", () => {
 });
 
 describe("Mittelherkunft und Begründung", () => {
+  it("privat ausgelegtes Geld erhöht nie das Kapitalkonto", () => {
+    expect(() => partnerPosting("DEPOSIT", "PRIVATE", 100_000)).toThrow(/nie das Kapitalkonto/);
+    expect(allowedSources("DEPOSIT")).toEqual(["BANK", "CASH"]);
+    const p = partnerPosting("OUTLAY", "PRIVATE", 100_000).deltas;
+    expect(p.partnerDeltaCents).toBe(0);
+    expect(p.claimDeltaCents).toBe(100_000);
+  });
+
   it("Mittelherkunft ist Pflicht und muss zum Vorgang passen", () => {
     expect(() => partnerPosting("OUTLAY", null, 1_000)).toThrow(/Mittelherkunft/);
     expect(() => partnerPosting("DRAW", "PRIVATE", 1_000)).toThrow(/nicht möglich/);
@@ -161,7 +169,7 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
     expect(csv).toContain("Bankkonto der Firma");
   });
 
-  it("PDF rendert die Tabelle inkl. Arabisch", async () => {
+  it("PDF rendert den Firmenbericht", async () => {
     const { renderReportPdf } = await import("@/application/reports/export");
     const s: Summary = {
       from: "2026-10-01", to: "2026-10-11",
@@ -177,7 +185,7 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
       }],
       entryCount: 0,
     };
-    const pdf = await renderReportPdf("Test GmbH", s, [], "Einnahmen- & Ausgabenprotokoll", false, bookings);
+    const pdf = await renderReportPdf("Test GmbH", s, [], "Einnahmen- & Ausgabenprotokoll", false, []);
     const doc = await PDFDocument.load(pdf);
     expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
     if (process.env.PDF_PREVIEW_DIR) writeFileSync(path.join(process.env.PDF_PREVIEW_DIR, "partner-report.pdf"), pdf);

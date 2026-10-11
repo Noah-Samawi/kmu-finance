@@ -209,7 +209,8 @@ export const incomeSchema = z.object({
 export const allocationSchema = z.object({
   employeeId: z.string().min(1),
   amountCents: positiveAmount,
-  description: z.string().trim().max(300).optional().nullable(),
+  description: z.string({ required_error: "Verwendungszweck (Wofür?) erforderlich" })
+    .trim().min(3, "Verwendungszweck (Wofür?) erforderlich").max(300),
   accountKind,
 });
 

@@ -20,8 +20,9 @@ export function SelfBookingForm({ today }: { today: string }) {
   const [hasFile, setHasFile] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const allowed = (s: Source) => !(kind === "DRAW" && s === "PRIVATE");
-  const effect: MsgKey | null = !source ? null
+  const allowed = (s: Source) => kind === "OUTLAY" || s !== "PRIVATE";
+  const effect: MsgKey | null = kind === "DEPOSIT" && !source ? "pb.effect.DEPOSIT.PRIVATE"
+    : !source ? null
     : kind === "DRAW" ? "pb.effect.DRAW"
     : `pb.effect.${kind}.${source === "PRIVATE" ? "PRIVATE" : "COMPANY"}` as MsgKey;
 
@@ -47,7 +48,7 @@ export function SelfBookingForm({ today }: { today: string }) {
         <select value={kind} onChange={(e) => {
           const k = e.target.value as Kind;
           setKind(k);
-          if (k === "DRAW" && source === "PRIVATE") setSource("");
+          if (k !== "OUTLAY" && source === "PRIVATE") setSource("");
         }} className={inputCls}>
           {(["OUTLAY", "DEPOSIT", "DRAW"] as Kind[]).map((k) => <option key={k} value={k}>{t(`pb.kind.${k}` as MsgKey)}</option>)}
         </select>

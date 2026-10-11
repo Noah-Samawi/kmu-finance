@@ -72,6 +72,8 @@ export async function renderPayslipPdf(p: PayslipPdfInput) {
   const rate = p.hourlyRateCents ?? 0;
   const byHours = hours > 0 && rate > 0;
   const konf = p.churchTax === "NONE" ? "--" : "ev/rk";
+  // Ohne Konfession: keine Kirchensteuer – weder Betrag noch Spalte oder Jahreszeile
+  const showChurch = p.churchTax !== "NONE" && (p.churchTaxCents > 0 || (p.ytd?.churchTaxCents ?? 0) > 0);
   const ytd: PayslipYtd = p.ytd ?? {
     grossCents: p.grossCents, wageTaxCents: p.wageTaxCents, churchTaxCents: p.churchTaxCents, soliCents: p.soliCents,
     kvCents: p.kvCents, rvCents: p.rvCents, avCents: p.avCents, pvCents: p.pvCents,
@@ -187,10 +189,14 @@ export async function renderPayslipPdf(p: PayslipPdfInput) {
   rightBox("Gesamt-Brutto", num(p.grossCents), ST - 16);
   const sCols = [L + 22, 132, 220, 308];
   lab("St", L, ST + 18, { bold: true });
-  ["Steuer-Brutto", "Lohnsteuer", "Kirchensteuer", "Solidaritätszuschlag"].forEach((t, i) => lab(t, sCols[i], ST + 18));
+  const taxCols: [string, number][] = [
+    ["Steuer-Brutto", p.taxGrossCents], ["Lohnsteuer", p.wageTaxCents],
+    ...(showChurch ? [["Kirchensteuer", p.churchTaxCents] as [string, number]] : []),
+    ["Solidaritätszuschlag", p.soliCents],
+  ];
+  taxCols.forEach(([t], i) => lab(t, sCols[i], ST + 18));
   val("L", L, ST + 31);
-  [p.taxGrossCents, p.wageTaxCents, p.churchTaxCents, p.soliCents].forEach((c, i) =>
-    val(num(c), sCols[i] - 4, ST + 31, { width: 72, align: "right" }));
+  taxCols.forEach(([, c], i) => val(num(c), sCols[i] - 4, ST + 31, { width: 72, align: "right" }));
   rightBox("Steuerrechtliche Abzüge", num(p.taxDeductionCents), ST + 18);
 
   const SV = ST + 54;
@@ -214,7 +220,8 @@ export async function renderPayslipPdf(p: PayslipPdfInput) {
   vl(vMid, VT, VT + 128, 0.4);
   const leftRows: [string, number][] = [
     ["Gesamt-Brutto", ytd.grossCents], ["Steuer-Brutto", ytd.grossCents], ["Lohnsteuer", ytd.wageTaxCents],
-    ["Kirchensteuer", ytd.churchTaxCents], ["Solidaritätszuschlag", ytd.soliCents],
+    ...(showChurch ? [["Kirchensteuer", ytd.churchTaxCents] as [string, number]] : []),
+    ["Solidaritätszuschlag", ytd.soliCents],
   ];
   const svRows: [string, number][] = [
     ["SV-Brutto", ytd.grossCents], ["KV-Beitrag", ytd.kvCents], ["RV-Beitrag", ytd.rvCents],

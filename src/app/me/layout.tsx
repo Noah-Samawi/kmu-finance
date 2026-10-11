@@ -29,6 +29,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
           <NavLink href="/me/receipts/new" variant="bottom"><IconCamera />{t("nav.me.receipt")}</NavLink>
           <NavLink href="/me/hr" variant="bottom"><IconList />{t("nav.me.hr")}</NavLink>
           <NavLink href="/me/history" variant="bottom"><IconList />{t("nav.me.history")}</NavLink>
+          <NavLink href="/me/report" variant="bottom"><IconList />{t("nav.me.report")}</NavLink>
         </div>
       </nav>
     </div>

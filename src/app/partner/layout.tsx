@@ -23,7 +23,7 @@ export default async function PartnerLayout({ children }: { children: React.Reac
       </header>
       <nav className="flex gap-2 px-4 pb-2">
         <NavLink href="/partner" variant="top">{t("nav.partner.capital")}</NavLink>
-        {user.canViewReports && <NavLink href="/partner/reports" variant="top">{t("nav.partner.reports")}</NavLink>}
+        <NavLink href="/partner/reports" variant="top">{t("nav.partner.reports")}</NavLink>
       </nav>
       <main className="flex-1 px-4 pb-10">{children}</main>
     </div>

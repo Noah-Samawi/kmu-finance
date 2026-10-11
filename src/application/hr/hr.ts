@@ -22,7 +22,8 @@ async function yearToDate(tx: Tx, tenantId: string, employeeId: string, year: nu
     eq(payslips.tenantId, tenantId), eq(payslips.employeeId, employeeId),
     eq(payslips.year, year), lte(payslips.month, month),
   ));
-  const all = extra ? [...rows, extra] : rows;
+  const all = (extra ? [...rows, extra] : rows).map((r) =>
+    "churchTax" in r && r.churchTax === "NONE" ? { ...r, churchTaxCents: 0 } : r);
   const sum = (k: keyof PayslipYtd) => all.reduce((s, r) => s + ((r as unknown as Record<string, number>)[k] ?? 0), 0);
   return {
     grossCents: sum("grossCents"), wageTaxCents: sum("wageTaxCents"), churchTaxCents: sum("churchTaxCents"),
@@ -52,6 +53,24 @@ function payslipInput(
     pgrs: "101", bgrs: "1111",
     issuedAt: slip.issuedAt,
     ytd,
+  };
+}
+
+/**
+ * Ein ausgestelltes Dokument zeigt exakt die gespeicherten Beträge (GoBD).
+ * Ohne Konfession ist die Kirchensteuer immer 0.
+ */
+export function issuedValues(calc: PayrollResult, p: typeof payslips.$inferSelect): PayrollResult {
+  const churchTaxCents = p.churchTax === "NONE" ? 0 : p.churchTaxCents;
+  const taxDeductionCents = p.wageTaxCents + p.soliCents + churchTaxCents;
+  const svDeductionCents = p.rvCents + p.avCents + p.kvCents + p.pvCents;
+  const netCents = p.churchTax === "NONE" && p.churchTaxCents > 0 ? p.netCents + p.churchTaxCents : p.netCents;
+  return {
+    ...calc,
+    grossCents: p.grossCents, taxGrossCents: p.grossCents,
+    rvCents: p.rvCents, avCents: p.avCents, kvCents: p.kvCents, pvCents: p.pvCents,
+    wageTaxCents: p.wageTaxCents, soliCents: p.soliCents, churchTaxCents,
+    taxDeductionCents, svDeductionCents, netCents, payoutCents: netCents,
   };
 }
 
@@ -201,10 +220,10 @@ export async function getPayslipPdf(ctx: Ctx, employeeId: string, payslipId: str
     const emp = await tx.query.users.findFirst({ where: eq(users.id, employeeId) });
     const profile = await tx.query.employeeProfiles.findFirst({ where: eq(employeeProfiles.userId, employeeId) });
     const t = (await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }))!;
-    const calc = calculatePayslip({
+    const calc = issuedValues(calculatePayslip({
       grossCents: p.grossCents, taxClass: p.taxClass, childAllowances: p.childAllowances,
       churchTax: p.churchTax, kvAdditionalBp: profile?.kvAdditionalBp ?? 250,
-    });
+    }), p);
     const hours = p.hoursWorked != null ? Number(p.hoursWorked) : null;
     const ytd = await yearToDate(tx, tenantId, employeeId, p.year, p.month);
     const pdf = await renderPayslipPdf(payslipInput(calc, t, { id: employeeId, name: emp?.name ?? "Mitarbeiter" }, profile, {

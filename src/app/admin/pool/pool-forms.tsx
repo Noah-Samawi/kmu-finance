@@ -37,7 +37,7 @@ export function AllocationForm({ employees, poolCents, cashCents, bankCents, pre
       e.preventDefault();
       const form = e.currentTarget;
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
-      if (await call("POST", "/api/v1/pool/allocations", { employeeId: f.employeeId, amountCents: f.amount, description: f.description || null, accountKind: f.accountKind })) form.reset();
+      if (await call("POST", "/api/v1/pool/allocations", { employeeId: f.employeeId, amountCents: f.amount, description: f.description, accountKind: f.accountKind })) form.reset();
     }}>
       {!presetEmployeeId ? (
         <Field label="An wen?">
@@ -56,7 +56,7 @@ export function AllocationForm({ employees, poolCents, cashCents, bankCents, pre
       <Field label="Betrag" hint={`Gesamt frei: ${formatCents(poolCents)}`}>
         <input name="amount" required inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} />
       </Field>
-      <Field label="Zweck (optional)"><input name="description" placeholder="z. B. Wareneinkauf Großmarkt" className={inputCls} dir="auto" /></Field>
+      <Field label="Verwendungszweck (Pflicht)"><input name="description" required minLength={3} placeholder="z. B. Wareneinkauf Großmarkt" className={inputCls} dir="auto" /></Field>
       <ErrorNote error={error} />
       <button disabled={busy || poolCents <= 0} className={cx(btn.base, btn.primary, "w-full")}>Budget zuteilen</button>
     </form>
