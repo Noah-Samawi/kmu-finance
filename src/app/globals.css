@@ -22,7 +22,7 @@
   --color-amber-soft: #fbf0dc;
   --color-bon: #fffdf8;
 
-  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Instrument Sans Variable", "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
   --font-bon: "IBM Plex Mono", ui-monospace, monospace;
 }
 
@@ -36,6 +36,15 @@ body {
 body {
   font-size: 15px;
   line-height: 1.5;
+}
+
+/* Freitext (Deutsch/Arabisch): Schreibrichtung je Absatz aus dem Inhalt (wie dir="auto") */
+input:not([type="number"]):not([type="date"]):not([type="email"]),
+textarea,
+td,
+li,
+[data-user-text] {
+  unicode-bidi: plaintext;
 }
 
 /* Beträge mit gleich breiten Ziffern -> Spalten stehen sauber untereinander */

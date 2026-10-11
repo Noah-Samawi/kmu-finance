@@ -10,6 +10,7 @@ export function LetterheadForm({ tenant }: { tenant: {
   invoicePrefix: string; defaultPaymentDays: number; invoiceFooter: string | null;
   defaultPaymentMethod: "TRANSFER" | "CASH"; logoKey: string | null;
   bankName?: string | null; invoiceEmail?: string | null; website?: string | null;
+  invoiceTagline?: string | null; ownerName?: string | null;
 } }) {
   const { call, busy, error } = useApi();
   const [logo, setLogo] = useState(tenant.logoKey ?? "");
@@ -24,14 +25,17 @@ export function LetterheadForm({ tenant }: { tenant: {
         invoicePrefix: f.invoicePrefix, defaultPaymentDays: Number(f.defaultPaymentDays),
         invoiceFooter: f.invoiceFooter || null, defaultPaymentMethod: f.defaultPaymentMethod,
         bankName: f.bankName || null, invoiceEmail: f.invoiceEmail || null, website: f.website || null,
+        invoiceTagline: f.invoiceTagline || null, ownerName: f.ownerName || null,
         logoDataUrl: logo || null,
       });
     }}>
-      <Field label="Firmenname (Briefkopf)" className="sm:col-span-2"><input name="legalName" defaultValue={tenant.legalName} required className={inputCls} /></Field>
-      <Field label="Straße"><input name="street" defaultValue={tenant.street} required className={inputCls} /></Field>
+      <Field label="Firmenname (Briefkopf)" className="sm:col-span-2"><input name="legalName" dir="auto" defaultValue={tenant.legalName} required className={inputCls} /></Field>
+      <Field label="Slogan unter dem Namen" hint="z. B. Küche · Gastronomie · Hospitality"><input name="invoiceTagline" dir="auto" defaultValue={tenant.invoiceTagline ?? ""} className={inputCls} /></Field>
+      <Field label="Inhaber / Geschäftsführer"><input name="ownerName" dir="auto" defaultValue={tenant.ownerName ?? ""} className={inputCls} /></Field>
+      <Field label="Straße"><input name="street" dir="auto" defaultValue={tenant.street} required className={inputCls} /></Field>
       <Field label="PLZ / Ort" className="grid grid-cols-[100px_1fr] gap-2">
         <input name="zip" defaultValue={tenant.zip} required className={inputCls} />
-        <input name="city" defaultValue={tenant.city} required className={inputCls} />
+        <input name="city" dir="auto" defaultValue={tenant.city} required className={inputCls} />
       </Field>
       <Field label="Steuernummer"><input name="taxNumber" defaultValue={tenant.taxNumber ?? ""} className={inputCls} /></Field>
       <Field label="USt-IdNr."><input name="vatId" defaultValue={tenant.vatId ?? ""} className={inputCls} /></Field>

@@ -41,7 +41,7 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
 
   if (!employeeView) {
     w.line("Saldo-Übertrag (Anfangssaldo = Endsaldo der Vorperiode)", { size: 11, bold: true });
-    w.tableBoxed(
+    w.tableOpen(
       [
         { title: "Konto", width: 220 },
         { title: "Übertrag / Anfang", width: 155, align: "right" },

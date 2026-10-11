@@ -121,6 +121,8 @@ export const letterheadSchema = z.object({
   bankName: optStr(120),
   invoiceEmail: optStr(200),
   website: optStr(200),
+  invoiceTagline: optStr(120),
+  ownerName: optStr(120),
   logoDataUrl: z.string().max(2_000_000).optional().nullable(),
 });
 

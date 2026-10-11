@@ -61,6 +61,7 @@ export async function issueInvoice(ctx: Ctx, id: string) {
         vatId: t.vatId, iban: t.iban, bic: t.bic, smallBusiness: t.smallBusiness,
         logoKey: t.logoKey, invoiceFooter: t.invoiceFooter,
         bankName: t.bankName, invoiceEmail: t.invoiceEmail, website: t.website,
+        tagline: t.invoiceTagline, ownerName: t.ownerName,
       },
       recipient: { name: c.name, street: c.street, zip: c.zip, city: c.city, vatId: c.vatId },
     };
@@ -179,6 +180,7 @@ export async function getInvoicePdf(ctx: Ctx, id: string): Promise<{ filename: s
       taxNumber: t!.taxNumber, vatId: t!.vatId, iban: t!.iban, bic: t!.bic,
       smallBusiness: t!.smallBusiness, logoKey: t!.logoKey, invoiceFooter: t!.invoiceFooter,
       bankName: t!.bankName, invoiceEmail: t!.invoiceEmail, website: t!.website,
+      tagline: t!.invoiceTagline, ownerName: t!.ownerName,
     },
     recipient: snap?.recipient ?? inv.contact,
     netCents: inv.netCents, vatCents: inv.vatCents, grossCents: inv.grossCents,

@@ -22,6 +22,8 @@ export interface InvoicePdfData {
     bankName?: string | null;
     invoiceEmail?: string | null;
     website?: string | null;
+    tagline?: string | null;
+    ownerName?: string | null;
   };
   recipient: { name: string; street: string | null; zip: string | null; city: string | null; vatId: string | null };
   items: { position: number; description: string; quantity: string; unit: string; unitPriceCents: number; vatRate: number; lineNetCents: number; lineVatCents: number }[];
@@ -31,146 +33,175 @@ export interface InvoicePdfData {
 }
 
 const qtyFmt = (q: string) => Number(q).toLocaleString("de-DE", { maximumFractionDigits: 3 });
-const LEFT = 270;
-const RIGHT_X = 318;
+const GRAY: [number, number, number] = [0.42, 0.42, 0.45];
+const INK: [number, number, number] = [0.07, 0.07, 0.08];
+const BORDER: [number, number, number] = [0.72, 0.72, 0.74];
 
 export async function renderInvoicePdf(d: InvoicePdfData): Promise<Uint8Array> {
   const w = await PdfWriter.create();
+  const left = MARGIN;
   const right = A4.w - MARGIN;
-  const contentW = A4.w - 2 * MARGIN;
+  const contentW = right - left;
+  const iss = d.issuer;
 
-  if (d.issuer.logoKey?.startsWith("data:image")) {
+  // ── Briefkopf: Logo + Firmenname rechtsbündig (Serif, Versalien) ──
+  w.y = A4.h - 46;
+  if (iss.logoKey?.startsWith("data:image")) {
     try {
-      const img = await w.embedImage(d.issuer.logoKey);
-      const scale = Math.min(36 / img.height, 100 / img.width);
-      w.page.drawImage(img, {
-        x: right - img.width * scale, y: A4.h - 38 - img.height * scale,
-        width: img.width * scale, height: img.height * scale,
-      });
-    } catch { /* optional */ }
+      const img = await w.embedImage(iss.logoKey);
+      const scale = Math.min(38 / img.height, 120 / img.width);
+      const h = img.height * scale;
+      w.page.drawImage(img, { x: right - img.width * scale, y: w.y - h + 8, width: img.width * scale, height: h });
+      w.y -= h + 10;
+    } catch { /* Logo optional */ }
   }
-
-  w.y = A4.h - 42;
-  w.line(d.issuer.legalName, { size: 13, bold: true, width: LEFT });
-  w.line(d.issuer.street, { size: 9, width: LEFT });
-  w.line(`${d.issuer.zip} ${d.issuer.city}`, { size: 9, width: LEFT });
-  if (d.issuer.invoiceEmail) w.line(d.issuer.invoiceEmail, { size: 8, color: [0.35, 0.35, 0.4], width: LEFT });
-  if (d.issuer.website) w.line(d.issuer.website, { size: 8, color: [0.35, 0.35, 0.4], width: LEFT });
-  w.y -= 16;
-
-  const colTop = w.y;
-  w.line("RECHNUNGSEMPFÄNGER", { size: 7, bold: true, color: [0.45, 0.45, 0.48], width: LEFT });
-  w.line(d.recipient.name, { size: 10, bold: true, width: LEFT });
-  if (d.recipient.street) w.line(d.recipient.street, { size: 10, width: LEFT });
-  if (d.recipient.zip || d.recipient.city) {
-    w.line(`${d.recipient.zip ?? ""} ${d.recipient.city ?? ""}`.trim(), { size: 10, width: LEFT });
+  w.y -= 14;
+  for (const l of w.wrap(iss.legalName.toLocaleUpperCase("de-DE"), 330, 24, { face: "serif", bold: true })) {
+    w.text(l, { x: left, width: contentW, align: "right", size: 24, face: "serif", bold: true, color: INK });
+    w.y -= 26;
   }
-  const leftBottom = w.y;
+  const headBottom = w.y + 12;
+  if (iss.tagline) w.text(iss.tagline.toLocaleUpperCase("de-DE"), { x: left, width: contentW, align: "right", size: 7, color: GRAY });
+  // Absenderzeile (DIN 5008) links auf Höhe des Slogans
+  w.text(w.fit([iss.legalName, iss.street, `${iss.zip} ${iss.city}`].join(" · "), 280, 7), { x: left, size: 7, color: GRAY });
+  w.y = Math.min(w.y, headBottom) - 10;
+  w.hLine(left, right, w.y, 1.3, [0.12, 0.12, 0.13]);
+  w.y -= 18;
 
-  w.y = colTop;
-  w.text("RECHNUNGSANGABEN", { x: RIGHT_X, size: 7, bold: true, color: [0.45, 0.45, 0.48] });
-  w.y -= 12;
+  // ── Kasten: Empfänger | Rechnungsangaben ──
+  const mid = left + contentW * 0.51;
+  const recLines = [
+    d.recipient.name,
+    d.recipient.street,
+    [d.recipient.zip, d.recipient.city].filter(Boolean).join(" "),
+    d.recipient.vatId ? `USt-IdNr.: ${d.recipient.vatId}` : null,
+  ].filter((x): x is string => !!x);
   const meta: [string, string][] = [
-    ["Rechnungsnummer", d.number ?? "– (Entwurf)"],
+    [d.isCancellation ? "Stornonummer" : "Rechnungsnummer", d.number ?? "– (Entwurf)"],
     ["Rechnungsdatum", fmtDate(d.issueDate)],
-    ["Liefer-/Leistungsdatum", fmtDate(d.serviceDate)],
+    ["Leistungsdatum", fmtDate(d.serviceDate)],
   ];
-  if (!d.isCancellation) meta.push(["Zahlbar bis", fmtDate(d.dueDate)]);
-  if (d.issuer.vatId) meta.push(["USt-IdNr.", d.issuer.vatId]);
-  if (d.issuer.taxNumber) meta.push(["Steuernummer", d.issuer.taxNumber]);
-  for (const [k, v] of meta) {
-    w.text(k, { x: RIGHT_X, size: 8, color: [0.4, 0.4, 0.45] });
-    w.text(v, { x: RIGHT_X, size: 8, bold: true, align: "right", width: right - RIGHT_X });
-    w.y -= 13;
-  }
-  w.y = Math.min(leftBottom, w.y) - 18;
+  if (!d.isCancellation && d.dueDate) meta.push(["Zahlbar bis", fmtDate(d.dueDate)]);
+  if (iss.vatId) meta.push(["USt-IdNr.", iss.vatId]);
+  if (iss.taxNumber) meta.push(["Steuernummer", iss.taxNumber]);
+  const rowH = 13;
+  const boxTop = w.y;
+  const boxH = 44 + Math.max(recLines.length, meta.length) * rowH;
+  w.strokeRect(left, boxTop - boxH, contentW, boxH, 0.6, undefined, BORDER);
+  w.vLine(mid, boxTop, boxTop - boxH, 0.6, BORDER);
+  w.drawAt(w.page, "RECHNUNGSEMPFÄNGER", left + 10, boxTop - 16, { size: 6.8, bold: true, color: GRAY });
+  w.drawAt(w.page, "RECHNUNGSANGABEN", mid + 10, boxTop - 16, { size: 6.8, bold: true, color: GRAY });
+  recLines.forEach((l, i) => {
+    w.drawAt(w.page, w.fit(l, mid - left - 20, 9), left + 10, boxTop - 40 - i * rowH, { size: 9, color: INK });
+  });
+  meta.forEach(([k, v], i) => {
+    const y = boxTop - 40 - i * rowH;
+    const lw = w.drawAt(w.page, `${k}: `, mid + 10, y, { size: 8.5, bold: true, color: INK });
+    w.drawAt(w.page, w.fit(v, right - mid - 20 - lw, 8.5), mid + 10 + lw, y, { size: 8.5, color: INK });
+  });
+  w.y = boxTop - boxH - 40;
 
+  // ── Titel + Anrede ──
   const title = d.isCancellation ? "Stornorechnung" : "Rechnung";
-  w.line(d.isDraft ? `${title} – ENTWURF` : title, { size: 20, bold: true, width: contentW });
-  if (d.isCancellation && d.cancelsNumber) w.line(`Storno zur Rechnung ${d.cancelsNumber}`, { size: 10, width: contentW });
-  w.y -= 4;
+  w.text(d.isDraft ? `${title} – Entwurf` : title, { x: left, size: 24, face: "serif", bold: true, color: INK });
+  w.y -= 22;
+  if (d.isCancellation && d.cancelsNumber) w.line(`Storno zur Rechnung ${d.cancelsNumber}`, { size: 9, width: contentW });
   w.paragraph(
     d.isCancellation
-      ? "Hiermit stornieren wir die nachfolgend aufgeführte Leistung."
+      ? "Hiermit stornieren wir die nachfolgend aufgeführten Leistungen."
       : "Sehr geehrte Damen und Herren,\nfür die erbrachten Leistungen berechnen wir Ihnen wie folgt:",
     contentW,
-    { size: 9 },
+    { size: 8.8, color: INK },
   );
   w.y -= 8;
 
-  w.tableOpen(
-    [
-      { title: "POS.", width: 36 },
-      { title: "BESCHREIBUNG", width: 210 },
-      { title: "MENGE", width: 70, align: "right" },
-      { title: "EINZELPREIS", width: 90, align: "right" },
-      { title: "BETRAG", width: contentW - 406, align: "right" },
-    ],
-    d.items.map((i) => [
-      String(i.position).padStart(2, "0"),
-      i.description,
-      `${qtyFmt(i.quantity)} ${i.unit}`,
-      formatCents(i.unitPriceCents),
-      formatCents(i.lineNetCents),
-    ]),
-  );
-  w.y -= 10;
+  // ── Positionstabelle ──
+  const cols = [
+    { title: "POS.", width: 40 },
+    { title: "BESCHREIBUNG", width: 223 },
+    { title: "MENGE", width: 75, align: "right" as const },
+    { title: "EINZELPREIS", width: 78 },
+    { title: "BETRAG", width: contentW - 416 },
+  ].map((c, i) => (i >= 3 ? { ...c, align: "right" as const } : c));
+  w.gridTable(cols, d.items.map((i) => {
+    const [head, ...rest] = i.description.split("\n");
+    const sub = rest.join(" ").trim();
+    return [
+      { parts: [{ text: String(i.position).padStart(2, "0") }] },
+      { parts: [{ text: head, bold: true }, ...(sub ? [{ text: sub }] : [])] },
+      { parts: [{ text: `${qtyFmt(i.quantity)} ${i.unit}`.trim() }] },
+      { parts: [{ text: formatCents(i.unitPriceCents) }] },
+      { parts: [{ text: formatCents(i.lineNetCents) }] },
+    ];
+  }), { size: 8.6 });
+  w.y -= 24;
 
-  const sumRow = (label: string, value: string, bold = false, size = 10) => {
-    w.ensureSpace(16);
-    w.text(label, { x: RIGHT_X, size, bold });
-    w.text(value, { x: RIGHT_X, size, bold, align: "right", width: right - RIGHT_X });
-    w.y -= 15;
-  };
-  sumRow("Summe netto", formatCents(d.netCents));
-  if (d.issuer.smallBusiness) {
-    w.paragraph("Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.", contentW, { size: 8 });
-  } else {
+  // ── Summenblock: Summe Netto · MwSt. X % · Rechnungsbetrag brutto ──
+  const sx = left + contentW * 0.465;
+  const sumRows: [string, string][] = [["Summe Netto", formatCents(d.netCents)]];
+  if (d.issuer.smallBusiness) sumRows.push(["MwSt. 0 % (§ 19 UStG)", formatCents(0)]);
+  else {
     const br = vatBreakdown(d.items);
-    if (!br.length) sumRow("Umsatzsteuer 0 %", formatCents(0));
-    else for (const v of br) sumRow(`Umsatzsteuer ${formatVatRate(v.rate)}`, formatCents(v.vat));
+    if (!br.length) sumRows.push(["MwSt. 0 %", formatCents(0)]);
+    for (const v of br) sumRows.push([`MwSt. ${formatVatRate(v.rate)}`, formatCents(v.vat)]);
   }
-  w.hLine(RIGHT_X, right, w.y + 6);
-  sumRow("Rechnungsbetrag brutto", formatCents(d.grossCents), true, 12);
-  w.y -= 14;
+  w.ensureSpace(sumRows.length * 24 + 40);
+  for (const [k, v] of sumRows) {
+    w.text(k, { x: sx + 6, size: 8.8, color: INK });
+    w.text(v, { x: sx, width: contentW - (sx - left) - 6, align: "right", size: 8.8, color: INK });
+    w.y -= 10;
+    w.hLine(sx, right, w.y, 0.5, BORDER);
+    w.y -= 14;
+  }
+  w.y += 10;
+  w.hLine(sx, right, w.y, 1.3, INK);
+  w.y -= 18;
+  w.text("Rechnungsbetrag brutto", { x: sx + 6, size: 8.8, bold: true, color: INK });
+  w.text(formatCents(d.grossCents), { x: sx, width: contentW - (sx - left) - 6, align: "right", size: 14, face: "serif", bold: true, color: INK });
+  w.y -= 34;
 
+  // ── Zahlungsinformationen (grauer Kasten, volle Bankverbindung) ──
+  const cash = d.paymentMethod === "CASH";
+  const payCells: [string, string][][] = cash
+    ? [[["Zahlungsart", "Barzahlung"], ["Betrag", formatCents(d.grossCents)], ["Fällig bis", fmtDate(d.dueDate)]]]
+    : [
+        [["Kontoinhaber", iss.legalName], ["IBAN", iss.iban ?? "–"], ["Verwendungszweck", d.number ?? "–"]],
+        [["Bank", iss.bankName ?? "–"], ["BIC", iss.bic ?? "–"], ["Zahlbar bis", fmtDate(d.dueDate)]],
+      ];
+  const payH = 14 + payCells.length * 30;
+  w.ensureSpace(payH + 70);
+  w.text("ZAHLUNGSINFORMATIONEN", { x: left, size: 6.8, bold: true, color: GRAY });
+  w.y -= 10;
   const payTop = w.y;
-  w.line("ZAHLUNGSINFORMATIONEN", { size: 7, bold: true, color: [0.45, 0.45, 0.48], width: LEFT });
-  if (d.paymentMethod === "CASH") {
-    w.paragraph(`Bitte zahlen Sie ${formatCents(d.grossCents)} bar${d.dueDate ? ` bis zum ${fmtDate(d.dueDate)}` : ""}.`, LEFT, { size: 8 });
-  } else {
-    w.paragraph(
-      `Bitte überweisen Sie den Rechnungsbetrag unter Angabe der Rechnungsnummer ${d.number ?? ""} innerhalb des genannten Zahlungsziels.`,
-      LEFT, { size: 8 },
-    );
+  w.strokeRect(left, payTop - payH, contentW, payH, 0.6, [0.95, 0.95, 0.95], BORDER);
+  const colW = [contentW * 0.35, contentW * 0.4, contentW * 0.25];
+  payCells.forEach((row, ri) => {
+    let x = left + 10;
+    row.forEach(([k, v], ci) => {
+      const y = payTop - 18 - ri * 30;
+      w.drawAt(w.page, k, x, y, { size: 8.5, bold: true, color: INK });
+      w.drawAt(w.page, w.fit(v, colW[ci] - 14, 8.5), x, y - 12, { size: 8.5, color: INK });
+      x += colW[ci];
+    });
+  });
+  w.y = payTop - payH - 18;
+  w.paragraph(
+    cash
+      ? `Bitte zahlen Sie den Rechnungsbetrag von ${formatCents(d.grossCents)} bar${d.dueDate ? ` bis zum ${fmtDate(d.dueDate)}` : ""}. Vielen Dank für Ihren Auftrag.`
+      : "Bitte überweisen Sie den Rechnungsbetrag unter Angabe der Rechnungsnummer innerhalb des genannten Zahlungsziels. Vielen Dank für Ihren Auftrag.",
+    contentW, { size: 8.8, color: INK },
+  );
+  if (d.notes) {
+    w.y -= 4;
+    w.paragraph(d.notes, contentW, { size: 8.5, color: INK });
   }
-  if (d.notes) w.paragraph(d.notes, LEFT, { size: 8 });
-  const leftPay = w.y;
 
-  w.y = payTop;
-  w.text("BANKVERBINDUNG", { x: RIGHT_X, size: 7, bold: true, color: [0.45, 0.45, 0.48] });
-  w.y -= 12;
-  const bankLines: [string, string][] = [
-    ["Kontoinhaber", d.issuer.legalName],
-    ...(d.issuer.bankName ? [["Bank", d.issuer.bankName] as [string, string]] : []),
-    ...(d.issuer.iban ? [["IBAN", d.issuer.iban] as [string, string]] : []),
-    ...(d.issuer.bic ? [["BIC", d.issuer.bic] as [string, string]] : []),
-    ...(d.number ? [["Verwendungszweck", d.number] as [string, string]] : []),
-    ...(d.issuer.invoiceEmail ? [["E-Mail", d.issuer.invoiceEmail] as [string, string]] : []),
-    ...(d.issuer.website ? [["Web", d.issuer.website] as [string, string]] : []),
-  ];
-  for (const [k, v] of bankLines) {
-    w.text(k, { x: RIGHT_X, size: 8, color: [0.4, 0.4, 0.45] });
-    w.text(v, { x: RIGHT_X, size: 8, bold: true, align: "right", width: right - RIGHT_X });
-    w.y -= 12;
-  }
-  w.y = Math.min(leftPay, w.y) - 8;
-
+  // ── Fußzeile: Anschrift, Steuer, Bank, Kontakt ──
   w.footerOnAllPages("", [
-    `${d.issuer.legalName} · ${d.issuer.street} · ${d.issuer.zip} ${d.issuer.city}`,
-    [d.issuer.taxNumber && `St.-Nr. ${d.issuer.taxNumber}`, d.issuer.vatId && `USt-IdNr. ${d.issuer.vatId}`].filter(Boolean).join(" · "),
-    [d.issuer.iban && `IBAN ${d.issuer.iban}`, d.issuer.bic && `BIC ${d.issuer.bic}`, d.issuer.invoiceEmail, d.issuer.website].filter(Boolean).join(" · "),
-    d.issuer.invoiceFooter?.replace(/\s+/g, " ").trim() ?? "",
+    [iss.legalName, iss.ownerName && `Inhaber: ${iss.ownerName}`, iss.street, `${iss.zip} ${iss.city}`].filter(Boolean).join(" · "),
+    [iss.taxNumber && `Steuernummer ${iss.taxNumber}`, iss.vatId && `USt-IdNr. ${iss.vatId}`, iss.invoiceEmail, iss.website].filter(Boolean).join(" · "),
+    [iss.bankName, iss.iban && `IBAN ${iss.iban}`, iss.bic && `BIC ${iss.bic}`].filter(Boolean).join(" · "),
+    iss.invoiceFooter?.replace(/\s+/g, " ").trim() ?? "",
   ].filter(Boolean));
   return w.save();
 }

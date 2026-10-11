@@ -6,3 +6,4 @@ node_modules
 /storage/
 *.tsbuildinfo
 next-env.d.ts
+/.pdf-preview/

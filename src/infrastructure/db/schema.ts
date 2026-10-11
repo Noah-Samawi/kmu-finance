@@ -78,6 +78,8 @@ export const tenants = pgTable("Tenant", {
   bankName: text("bankName"),
   invoiceEmail: text("invoiceEmail"),
   website: text("website"),
+  invoiceTagline: text("invoiceTagline"),
+  ownerName: text("ownerName"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

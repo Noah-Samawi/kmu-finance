@@ -3,7 +3,9 @@ import path from "node:path";
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ["bcryptjs", "pg", "@aws-sdk/client-s3", "@vercel/blob"],
+  serverExternalPackages: ["bcryptjs", "pg", "@aws-sdk/client-s3", "@vercel/blob", "@pdf-lib/fontkit"],
+  // Unicode-/Arabisch-Schrift für die PDF-Erzeugung (wird zur Laufzeit per fs gelesen)
+  outputFileTracingIncludes: { "/**": ["./assets/fonts/**"] },
   experimental: {
     serverActions: { bodySizeLimit: "12mb" },
   },

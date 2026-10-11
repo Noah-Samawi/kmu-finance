@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "@fontsource-variable/instrument-sans";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
+import "@fontsource/ibm-plex-sans-arabic/arabic-400.css";
+import "@fontsource/ibm-plex-sans-arabic/arabic-600.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -20,7 +22,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="de" dir="auto">
+    <html lang="de" dir="ltr">
       <body className="min-h-dvh antialiased">{children}</body>
     </html>
   );
