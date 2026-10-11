@@ -42,12 +42,19 @@ export const ledgerTypeEnum = pgEnum("LedgerType", [
   "PARTNER_DEPOSIT", // Einlage Gesellschafter
   "PARTNER_DRAW",    // Entnahme Gesellschafter
   "PARTNER_PROFIT",  // Gewinnanteil
+  "PARTNER_OUTLAY",        // Vorgelegtes Geld Gesellschafter + (eigene Tasche)
+  "PARTNER_OUTLAY_REFUND", // Vorgelegtes Geld -, Kasse/Bank - (gezielte Erstattung)
+  "PARTNER_EXPENSE",       // Kasse/Bank - (Gesellschafter zahlt mit Firmenmitteln)
 ]);
 export const paymentMethodEnum = pgEnum("PaymentMethod", ["TRANSFER", "CASH"]);
 export const accountKindEnum = pgEnum("AccountKind", ["CASH", "BANK"]);
 export const hrDocKindEnum = pgEnum("HrDocKind", ["ID", "CONTRACT", "TIMESHEET", "TAX", "PAYSLIP", "OTHER"]);
 export const reconcileStatusEnum = pgEnum("ReconcileStatus", ["GREEN", "RED", "CASH_WITHDRAWAL"]);
 export const churchTaxEnum = pgEnum("ChurchTax", ["NONE", "EIGHT", "NINE"]);
+export const fundingSourceEnum = pgEnum("FundingSource", ["PRIVATE", "BANK", "CASH"]);
+export const partnerBookingKindEnum = pgEnum("PartnerBookingKind", [
+  "DEPOSIT", "OUTLAY", "DRAW", "PROFIT", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED", "OUTLAY_REFUND",
+]);
 export const receiptStatusEnum = pgEnum("ReceiptStatus", ["SUBMITTED", "APPROVED", "REJECTED"]);
 export const periodTypeEnum = pgEnum("PeriodType", ["DAY", "MONTH"]);
 
@@ -247,6 +254,37 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   index("Ledger_tenant_type_idx").on(t.tenantId, t.type),
 ]);
 
+// Gesellschafter-Vorgänge mit Mittelherkunft und Begründung (unveränderlich, 1:1 zum Hauptbuch)
+export const partnerBookings = pgTable("PartnerBooking", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  partnerId: text("partnerId").notNull().references(() => users.id),
+  kind: partnerBookingKindEnum("kind").notNull(),
+  source: fundingSourceEnum("source"),
+  amountCents: integer("amountCents").notNull(),
+  purpose: text("purpose").notNull(),
+  receiptKey: text("receiptKey"),
+  receiptMime: text("receiptMime"),
+  receiptName: text("receiptName"),
+  bookingDate: timestamp("bookingDate", { withTimezone: true }).notNull().defaultNow(),
+  ledgerEntryId: text("ledgerEntryId").notNull().unique().references(() => ledgerEntries.id),
+  createdById: text("createdById").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [index("PartnerBooking_tenant_partner_idx").on(t.tenantId, t.partnerId, t.bookingDate)]);
+
+// Explizite Zuordnung: welche Erstattung tilgt welche Auslage mit welchem Betrag
+export const partnerOutlayRefunds = pgTable("PartnerOutlayRefund", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  outlayBookingId: text("outlayBookingId").notNull().references(() => partnerBookings.id),
+  refundBookingId: text("refundBookingId").notNull().references(() => partnerBookings.id),
+  amountCents: integer("amountCents").notNull(),
+  createdAt: createdAt(),
+}, (t) => [
+  index("PartnerOutlayRefund_outlay_idx").on(t.outlayBookingId),
+  uniqueIndex("PartnerOutlayRefund_pair_unique").on(t.outlayBookingId, t.refundBookingId),
+]);
+
 export const auditLogs = pgTable("AuditLog", {
   id: id(),
   tenantId: text("tenantId").references(() => tenants.id),
@@ -361,3 +399,5 @@ export type Role = (typeof roleEnum.enumValues)[number];
 export type LedgerType = (typeof ledgerTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type AccountKind = (typeof accountKindEnum.enumValues)[number];
+export type FundingSourceDb = (typeof fundingSourceEnum.enumValues)[number];
+export type PartnerBookingKindDb = (typeof partnerBookingKindEnum.enumValues)[number];

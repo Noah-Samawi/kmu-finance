@@ -85,11 +85,34 @@ export const partnerUpdateSchema = z.object({
   canViewBank: z.boolean().optional(),
 });
 
+const fundingSource = z.enum(["PRIVATE", "BANK", "CASH"], {
+  errorMap: () => ({ message: "Bitte Mittelherkunft / Konto auswählen" }),
+});
+const purpose = z.string().trim().min(3, "Wofür? / Begründung fehlt").max(500);
+
+/** Admin: Gesellschafter-Vorgang buchen (Erstattung läuft separat über partnerRefundSchema) */
 export const partnerBookSchema = z.object({
-  type: z.enum(["PARTNER_DEPOSIT", "PARTNER_DRAW", "PARTNER_PROFIT"]),
+  kind: z.enum(["DEPOSIT", "OUTLAY", "DRAW", "PROFIT", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED"]),
+  source: fundingSource.optional().nullable(),
   amountCents: positiveAmount,
-  description: z.string().trim().min(3).max(300),
-  accountKind: z.enum(["CASH", "BANK"]).default("BANK"),
+  purpose,
+  bookingDate: dateStr.optional(),
+});
+
+/** Gesellschafter: eigene Einlage, Auslage oder Entnahme (Mittelherkunft Pflicht) */
+export const partnerSelfBookSchema = z.object({
+  kind: z.enum(["DEPOSIT", "OUTLAY", "DRAW"], { errorMap: () => ({ message: "Bitte Vorgang auswählen" }) }),
+  source: fundingSource,
+  amountCents: positiveAmount,
+  purpose,
+  bookingDate: dateStr.optional(),
+});
+
+/** Admin: Auslagen-Erstattung, explizit einzelnen offenen Auslagen zugeordnet */
+export const partnerRefundSchema = z.object({
+  source: z.enum(["BANK", "CASH"], { errorMap: () => ({ message: "Bitte Konto für die Auszahlung wählen" }) }),
+  purpose,
+  items: z.array(z.object({ outlayId: z.string().min(1), amountCents: positiveAmount })).min(1, "Bitte mindestens eine offene Auslage auswählen"),
 });
 
 export const outlaySchema = z.object({

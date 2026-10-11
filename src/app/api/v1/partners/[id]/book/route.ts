@@ -1,6 +1,6 @@
 import { body, route } from "@/lib/api";
 import { partnerBookSchema } from "@/lib/validation/schemas";
-import { bookPartner } from "@/application/partners/partners";
+import { adminBookPartner } from "@/application/partners/partner-bookings";
 
 export const POST = route<{ id: string }>(["ADMIN"], async ({ req, ctx, params }) =>
-  bookPartner(ctx, params.id, await body(req, partnerBookSchema)));
+  adminBookPartner(ctx, params.id, await body(req, partnerBookSchema)));

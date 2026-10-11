@@ -9,13 +9,15 @@ import { fmtDate, fmtDateTime } from "@/domain/period";
 import { forbidden } from "@/domain/errors";
 import { requireRole, tid, type Ctx } from "../context";
 import { buildSummary, ledgerRows, rangeFromDays, type LedgerRow, type Summary } from "./reports";
+import { partnerBookingRows, type PartnerBookingRow } from "../partners/partner-bookings";
+import { FUNDING_LABEL, PARTNER_KIND_LABEL, REFUND_STATUS_LABEL } from "@/domain/partner";
 
 function typeLabel(r: LedgerRow) {
   return r.type === "REVERSAL" && r.reversedType ? `Storno ${LEDGER_LABEL[r.reversedType]}` : LEDGER_LABEL[r.type];
 }
 
 /** CSV im Excel-freundlichen deutschen Format: Semikolon, Dezimalkomma, UTF-8 mit BOM */
-export function toCsv(rows: LedgerRow[]): string {
+export function toCsv(rows: LedgerRow[], partnerBookings: PartnerBookingRow[] = []): string {
   const esc = (v: string | null | undefined) => {
     const s = (v ?? "").replace(/\r?\n/g, " ");
     // Formel-Injection in Excel verhindern
@@ -29,10 +31,47 @@ export function toCsv(rows: LedgerRow[]): string {
     centsToPlain(r.cashDeltaCents), centsToPlain(r.bankDeltaCents),
     centsToPlain(r.walletDeltaCents), centsToPlain(r.claimDeltaCents), centsToPlain(r.partnerDeltaCents),
   ].map(esc).join(";"));
-  return "﻿" + [header.join(";"), ...lines].join("\r\n") + "\r\n";
+  const partnerBlock = partnerBookings.length
+    ? ["", ["Gesellschafter-Buchungen", "Datum", "Person", "Vorgang", "Herkunft / Konto", "Betrag (EUR)", "Wofür? / Begründung", "Beleg", "Erfasst von", "Status"].map(esc).join(";"),
+      ...[...partnerBookings].reverse().map((b) => [
+        b.id, fmtDate(b.bookingDate), b.partnerName, PARTNER_KIND_LABEL[b.kind], b.source ? FUNDING_LABEL[b.source] : "",
+        centsToPlain(b.amountCents), b.purpose, b.hasReceipt ? "ja" : "nein", b.createdByName, partnerStatusText(b),
+      ].map(esc).join(";"))]
+    : [];
+  return "﻿" + [header.join(";"), ...lines, ...partnerBlock].join("\r\n") + "\r\n";
 }
 
-export async function renderReportPdf(tenantName: string, s: Summary, rows: LedgerRow[], title: string, employeeView: boolean) {
+export function partnerStatusText(b: PartnerBookingRow): string {
+  if (b.reversed) return "storniert";
+  if (b.kind === "OUTLAY_REFUND") {
+    return b.settles.length
+      ? `tilgt: ${b.settles.map((x) => `${fmtDate(x.bookingDate)} ${x.purpose} (${formatCents(x.amountCents)})`).join("; ")}`
+      : "Erstattung";
+  }
+  if (b.status) {
+    const base = REFUND_STATUS_LABEL[b.status];
+    if (b.status === "REFUNDED") return "durch Admin erstattet";
+    return b.status === "PARTIAL" ? `${base}, offen ${formatCents(b.openCents)}` : `${base} (${formatCents(b.openCents)})`;
+  }
+  if (b.kind === "OUTLAY") return "Firmenmittel – keine Erstattung";
+  return "gebucht";
+}
+
+export function partnerBookingTableRows(bookings: PartnerBookingRow[]): string[][] {
+  return [...bookings].reverse().map((b) => [
+    fmtDate(b.bookingDate),
+    b.partnerName,
+    PARTNER_KIND_LABEL[b.kind],
+    b.source ? FUNDING_LABEL[b.source] : "–",
+    formatCents(b.amountCents),
+    `${b.purpose}${b.hasReceipt ? " · Beleg" : " · ohne Beleg"}${b.selfEntered ? "" : ` · erfasst von ${b.createdByName}`}`,
+    partnerStatusText(b),
+  ]);
+}
+
+export async function renderReportPdf(
+  tenantName: string, s: Summary, rows: LedgerRow[], title: string, employeeView: boolean, partnerBookings: PartnerBookingRow[] = [],
+) {
   const w = await PdfWriter.create();
   const width = A4.w - 2 * MARGIN;
   w.line(title, { size: 16, bold: true });
@@ -58,8 +97,8 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
       ["Anfangsbestand", formatCents(s.pool.openingCents)],
       ["+ Einnahmen aus Rechnungen", formatCents(s.pool.incomeInvoiceCents)],
       ["+ Manuelle Einnahmen", formatCents(s.pool.incomeManualCents)],
-      ["– Budget-Zuteilungen an Mitarbeiter", formatCents(s.pool.allocatedCents)],
-      ["+ Rückführungen von Mitarbeitern", formatCents(s.pool.returnedCents)],
+      ["– Budget-Zuteilungen (Mitarbeiter und Gesellschafter)", formatCents(s.pool.allocatedCents)],
+      ["+ Budget-Rückführungen", formatCents(s.pool.returnedCents)],
       ["= Rest-Kassenbestand (Ende)", formatCents(s.pool.closingCents)],
     ]);
     w.y -= 8;
@@ -87,6 +126,19 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
   );
   if (s.partners?.length) {
     w.y -= 8;
+    w.line("Gesellschafter: Vorgelegtes Geld (Auslagen) und Budget – getrennt vom Kapitalkonto", { size: 11, bold: true });
+    w.table(
+      [
+        { title: "Gesellschafter", width: 110 }, { title: "Auslagen Anfang", width: 70, align: "right" },
+        { title: "+ Vorgelegt", width: 62, align: "right" }, { title: "– Erstattet", width: 62, align: "right" },
+        { title: "Offen Ende", width: 66, align: "right" }, { title: "Budget Ende", width: 62, align: "right" },
+        { title: "Firmenmittel", width: width - 432, align: "right" },
+      ],
+      s.partners.map((p) => [p.name, formatCents(p.outlayOpeningCents), formatCents(p.outlayCents), formatCents(p.refundCents),
+        formatCents(p.outlayClosingCents), formatCents(p.budgetClosingCents), formatCents(p.expenseCents)]),
+      8,
+    );
+    w.y -= 8;
     w.line("Gesellschafter-Kapitalkonten", { size: 11, bold: true });
     w.table(
       [
@@ -96,6 +148,19 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
       ],
       s.partners.map((p) => [p.name, formatCents(p.openingCents), formatCents(p.depositCents), formatCents(p.drawCents), formatCents(p.profitCents), formatCents(p.closingCents)]),
       8,
+    );
+  }
+  if (partnerBookings.length) {
+    w.y -= 8;
+    w.line(`Gesellschafter-Buchungen (${partnerBookings.length}) – Mittelherkunft, Zweck und Erstattungsstatus`, { size: 11, bold: true });
+    w.tableOpen(
+      [
+        { title: "Datum", width: 50 }, { title: "Person", width: 56 }, { title: "Vorgang", width: 86 },
+        { title: "Herkunft / Konto", width: 62 }, { title: "Betrag", width: 54, align: "right" },
+        { title: "Wofür? / Begründung", width: 100 }, { title: "Status", width: width - 408 },
+      ],
+      partnerBookingTableRows(partnerBookings),
+      7.5,
     );
   }
   w.y -= 8;
@@ -126,16 +191,19 @@ export async function exportReport(ctx: Ctx, format: "csv" | "pdf", from: string
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
   const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
-  const { rows, summary, tenantName } = await withTenant(ctx, async (tx) => ({
+  const { rows, summary, tenantName, partnerBookings } = await withTenant(ctx, async (tx) => ({
     rows: await ledgerRows(tx, tenantId, { range, employeeId: only, limit: 100_000 }),
     summary: await buildSummary(tx, tenantId, range, from, to, only),
+    partnerBookings: ctx.role === "EMPLOYEE" || (only && ctx.role === "ADMIN")
+      ? []
+      : await partnerBookingRows(tx, tenantId, { range, partnerId: only }),
     tenantName: (await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { name: true } }))!.name,
   }));
   const base = `protokoll_${from}_${to}`;
   if (format === "csv") {
-    return { filename: `${base}.csv`, mime: "text/csv; charset=utf-8", data: Buffer.from(toCsv(rows), "utf-8") };
+    return { filename: `${base}.csv`, mime: "text/csv; charset=utf-8", data: Buffer.from(toCsv(rows, partnerBookings), "utf-8") };
   }
   const title = ctx.role === "EMPLOYEE" ? `Kontoprotokoll ${ctx.name}` : "Einnahmen- & Ausgabenprotokoll";
-  const data = await renderReportPdf(tenantName, summary, rows, title, ctx.role === "EMPLOYEE");
+  const data = await renderReportPdf(tenantName, summary, rows, title, ctx.role === "EMPLOYEE", partnerBookings);
   return { filename: `${base}.pdf`, mime: "application/pdf", data: Buffer.from(data) };
 }

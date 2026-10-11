@@ -4,6 +4,7 @@ import { z } from "zod";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { ledgerEntries, users } from "@/infrastructure/db/schema";
 import { forbidden, notFound, rule } from "@/domain/errors";
+import { assertPartnerEntryReversible } from "../partners/partner-bookings";
 import { DIRECTLY_REVERSIBLE, LEDGER_LABEL, deltasFor, reversalDeltas } from "@/domain/ledger";
 import { ACCOUNT_LABEL } from "@/domain/accounts";
 import { adjustSchema, cashExpenseSchema, resetBudgetSchema, returnSchema } from "@/lib/validation/schemas";
@@ -81,6 +82,7 @@ export async function reverseEntry(ctx: Ctx, entryId: string, reason: string) {
     }
     const already = await tx.query.ledgerEntries.findFirst({ where: eq(ledgerEntries.reversalOfId, entryId) });
     if (already) throw rule("Buchung wurde bereits storniert");
+    await assertPartnerEntryReversible(tx, tenantId, entryId);
 
     const d = reversalDeltas(orig);
     const cash = await cashBalance(tx, tenantId);

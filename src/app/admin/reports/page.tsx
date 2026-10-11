@@ -4,6 +4,7 @@ import { getSummary, listClosings, type Summary } from "@/application/reports/re
 import { listEmployees } from "@/application/employees/employees";
 import { btn, cx, Field, inputCls, Money, PageHeader, Section, Table, td } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
+import { PartnerBookingList } from "@/components/partner-booking-list";
 import { formatCents } from "@/domain/money";
 import { fmtDate, fmtDateTime, monthKey, todayKey } from "@/domain/period";
 import { ClosingForm } from "./closing-form";
@@ -19,7 +20,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const from = isDay(sp.from) ? sp.from! : `${monthKey()}-01`;
   const to = isDay(sp.to) ? sp.to! : today;
   const employeeId = sp.employeeId || undefined;
-  const [{ summary: s, entries }, closings, employees] = await Promise.all([
+  const [{ summary: s, entries, partnerBookings }, closings, employees] = await Promise.all([
     getSummary(user, from, to, employeeId), listClosings(user), listEmployees(user),
   ]);
   const qs = new URLSearchParams({ from, to, ...(employeeId ? { employeeId } : {}) }).toString();
@@ -98,6 +99,25 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
               </tr>
             ))}
           </Table>
+        </Section>
+      )}
+      {s.partners?.length > 0 && (
+        <Section title="Gesellschafter: Vorgelegtes Geld und Budget (getrennt vom Kapitalkonto)" className="mt-6" flush>
+          <Table head={["Gesellschafter", "Auslagen Anfang", "+ Vorgelegt", "– Erstattet", "Offen Ende", "Budget Ende", "Firmenmittel-Ausgaben"].map((h, i) => <span key={h} className={i ? "block text-right" : ""}>{h}</span>)}>
+            {s.partners.map((p) => (
+              <tr key={p.partnerId}>
+                <td className={td + " font-medium"}>{p.name}</td>
+                {[p.outlayOpeningCents, p.outlayCents, p.refundCents, p.outlayClosingCents, p.budgetClosingCents, p.expenseCents].map((v, i) => (
+                  <td key={i} className={td + " text-right"}><Money cents={v} /></td>
+                ))}
+              </tr>
+            ))}
+          </Table>
+        </Section>
+      )}
+      {partnerBookings.length > 0 && (
+        <Section title={`Gesellschafter-Buchungen (${partnerBookings.length}) – Herkunft, Zweck, Erstattungsstatus`} className="mt-6" flush>
+          <PartnerBookingList rows={partnerBookings} showPartner />
         </Section>
       )}
 

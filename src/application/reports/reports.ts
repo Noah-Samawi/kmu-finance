@@ -6,6 +6,7 @@ import { invoices, ledgerEntries, periodClosings, receipts, users, type LedgerTy
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "../context";
+import { partnerBookingRows } from "../partners/partner-bookings";
 import { audit, bankBalance, cashBalance, claimBalance, partnerBalance, poolBalance, walletBalance } from "../ledger-service";
 
 export interface Range { start: Date; end: Date }
@@ -72,6 +73,12 @@ export interface EmployeeSummary {
 export interface PartnerSummary {
   partnerId: string; name: string;
   openingCents: number; depositCents: number; drawCents: number; profitCents: number; closingCents: number;
+  /** Verrechnungskonto "Vorgelegtes Geld": nur durch gezielte Erstattung reduziert */
+  outlayOpeningCents: number; outlayCents: number; refundCents: number; outlayClosingCents: number;
+  /** Budget / Vorschuss der Firma an den Gesellschafter */
+  budgetOpeningCents: number; budgetClosingCents: number;
+  /** mit Firmenkarte oder aus der Kasse bezahlte Ausgaben */
+  expenseCents: number;
 }
 
 export interface Summary {
@@ -140,15 +147,27 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
   const partners: PartnerSummary[] = [];
   for (const p of partnerList) {
     const opening = await partnerBalance(tx, tenantId, p.id, range.start);
+    const outlayOpening = await claimBalance(tx, tenantId, p.id, range.start);
+    const budgetOpening = await walletBalance(tx, tenantId, p.id, range.start);
+    const mine = rows.filter((r) => r.employeeId === p.id);
     const row: PartnerSummary = {
       partnerId: p.id, name: p.name, openingCents: opening,
       depositCents: sumPartner("PARTNER_DEPOSIT", p.id),
       drawCents: neg(sumPartner("PARTNER_DRAW", p.id)),
       profitCents: sumPartner("PARTNER_PROFIT", p.id),
       closingCents: 0,
+      outlayOpeningCents: outlayOpening,
+      outlayCents: sumClaim("PARTNER_OUTLAY", p.id),
+      refundCents: neg(sumClaim("PARTNER_OUTLAY_REFUND", p.id)),
+      outlayClosingCents: outlayOpening + mine.reduce((t, r) => t + r.claimDeltaCents, 0),
+      budgetOpeningCents: budgetOpening,
+      budgetClosingCents: budgetOpening + mine.reduce((t, r) => t + r.walletDeltaCents, 0),
+      expenseCents: neg(mine.filter((r) => effType(r) === "PARTNER_EXPENSE").reduce((t, r) => t + r.poolDeltaCents, 0)),
     };
     row.closingCents = row.openingCents + row.depositCents - row.drawCents + row.profitCents;
-    if (row.openingCents || row.closingCents || row.depositCents || row.drawCents || row.profitCents) partners.push(row);
+    if (row.openingCents || row.closingCents || row.depositCents || row.drawCents || row.profitCents
+      || row.outlayOpeningCents || row.outlayClosingCents || row.outlayCents || row.refundCents
+      || row.budgetOpeningCents || row.budgetClosingCents || row.expenseCents) partners.push(row);
   }
 
   const poolOpening = onlyEmployeeId ? 0 : await poolBalance(tx, tenantId, range.start);
@@ -200,6 +219,9 @@ export async function getSummary(ctx: Ctx, from: string, to: string, employeeId?
   return withTenant(ctx, async (tx) => ({
     summary: await buildSummary(tx, tenantId, range, from, to, only),
     entries: await ledgerRows(tx, tenantId, { range, employeeId: only, limit: 2000 }),
+    partnerBookings: ctx.role === "EMPLOYEE" || (only && ctx.role === "ADMIN")
+      ? []
+      : await partnerBookingRows(tx, tenantId, { range, partnerId: only }),
   }));
 }
 

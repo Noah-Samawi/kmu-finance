@@ -1,17 +1,17 @@
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
+import { withTenant } from "@/infrastructure/db/tenant-tx";
 import { users } from "@/infrastructure/db/schema";
 import { destroyAllSessionsOfUser, hashPassword } from "@/infrastructure/auth/session";
-import { conflict, rule } from "@/domain/errors";
-import { ACCOUNT_LABEL } from "@/domain/accounts";
-import { deltasFor } from "@/domain/ledger";
-import { partnerBookSchema, partnerCreateSchema, partnerUpdateSchema } from "@/lib/validation/schemas";
+import { conflict } from "@/domain/errors";
+import { partnerCreateSchema, partnerUpdateSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import {
-  accountBalance, audit, insertEntry, insufficient, loadPartner, partnerBalance, partnerBalancesByPartner,
+  audit, claimBalance, claimBalancesByEmployee, loadPartner, partnerBalance, partnerBalancesByPartner,
+  walletBalance, walletBalancesByEmployee,
 } from "../ledger-service";
 import { ledgerRows } from "../reports/reports";
+import { partnerBookingRows } from "./partner-bookings";
 
 const publicCols = {
   id: users.id, name: users.name, email: users.email, isActive: users.isActive,
@@ -26,8 +26,17 @@ export async function listPartners(ctx: Ctx) {
     const list = await tx.select(publicCols).from(users)
       .where(and(eq(users.tenantId, tenantId), eq(users.role, "PARTNER")))
       .orderBy(asc(users.name));
-    const balances = await partnerBalancesByPartner(tx, tenantId);
-    return list.map((p) => ({ ...p, capitalCents: balances.get(p.id) ?? 0 }));
+    const capital = await partnerBalancesByPartner(tx, tenantId);
+    const outlays = await claimBalancesByEmployee(tx, tenantId);
+    const budgets = await walletBalancesByEmployee(tx, tenantId);
+    const bookings = await partnerBookingRows(tx, tenantId, { limit: 2000 });
+    return list.map((p) => ({
+      ...p,
+      capitalCents: capital.get(p.id) ?? 0,
+      outlayOpenCents: outlays.get(p.id) ?? 0,
+      budgetCents: budgets.get(p.id) ?? 0,
+      bookings: bookings.filter((b) => b.partnerId === p.id),
+    }));
   });
 }
 
@@ -43,6 +52,9 @@ export async function getPartner(ctx: Ctx, partnerId: string) {
       id: p.id, name: p.name, email: p.email, isActive: p.isActive,
       canViewReports: p.canViewReports, canViewBank: p.canViewBank,
       capitalCents: await partnerBalance(tx, tenantId, p.id),
+      outlayOpenCents: await claimBalance(tx, tenantId, p.id),
+      budgetCents: await walletBalance(tx, tenantId, p.id),
+      bookings: await partnerBookingRows(tx, tenantId, { partnerId: p.id, limit: 500 }),
       entries: await ledgerRows(tx, tenantId, { employeeId: p.id, limit: 200 }),
     };
   });
@@ -83,32 +95,4 @@ export async function updatePartner(ctx: Ctx, partnerId: string, input: z.infer<
   });
   if (input.isActive === false || input.password) await destroyAllSessionsOfUser(partnerId);
   return result;
-}
-
-export async function bookPartner(ctx: Ctx, partnerId: string, input: z.infer<typeof partnerBookSchema>) {
-  requireRole(ctx, "ADMIN");
-  const tenantId = tid(ctx);
-  const account = input.accountKind ?? "BANK";
-  return withTenant(ctx, async (tx) => {
-    await lockTenantLedger(tx, tenantId);
-    const p = await loadPartner(tx, tenantId, partnerId);
-    if (input.type === "PARTNER_DRAW") {
-      const avail = await accountBalance(tx, tenantId, account);
-      if (avail < input.amountCents) throw insufficient(ACCOUNT_LABEL[account], avail);
-      const cap = await partnerBalance(tx, tenantId, partnerId);
-      if (cap < input.amountCents) throw insufficient("Kapitalkonto", cap);
-    }
-    const d = input.type === "PARTNER_PROFIT"
-      ? { ...deltasFor("PARTNER_PROFIT", input.amountCents, account), cashDeltaCents: 0, bankDeltaCents: 0, poolDeltaCents: 0, accountKind: null }
-      : deltasFor(input.type, input.amountCents, account);
-    if (input.type === "PARTNER_DEPOSIT") {
-      // Einlage erhöht Kasse/Bank
-    }
-    const entry = await insertEntry(tx, ctx, tenantId, {
-      type: input.type, ...d, employeeId: p.id,
-      description: `${input.description} · ${ACCOUNT_LABEL[account]}`,
-    });
-    await audit(tx, ctx, "partner.book", "LedgerEntry", entry.id, { partnerId, type: input.type });
-    return { entry, capitalCents: await partnerBalance(tx, tenantId, partnerId) };
-  });
 }

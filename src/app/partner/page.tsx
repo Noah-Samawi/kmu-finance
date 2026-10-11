@@ -3,20 +3,41 @@ import { requireUser } from "@/lib/auth";
 import { getPartner } from "@/application/partners/partners";
 import { Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
+import { PartnerBookingList } from "@/components/partner-booking-list";
 import { formatCents } from "@/domain/money";
+import { todayKey } from "@/domain/period";
+import { getT } from "@/lib/i18n-server";
+import { SelfBookingForm } from "./self-booking-form";
 
 export const metadata: Metadata = { title: "Kapitalkonto" };
 
 export default async function PartnerHome() {
   const user = await requireUser("PARTNER");
+  const t = await getT();
   const p = await getPartner(user, user.userId);
+  const cards = [
+    { label: t("pb.capital"), hint: t("pb.capitalHint"), cents: p.capitalCents },
+    { label: t("pb.outlay"), hint: t("pb.outlayHint"), cents: p.outlayOpenCents, accent: p.outlayOpenCents > 0 },
+    { label: t("pb.budget"), hint: t("pb.budgetHint"), cents: p.budgetCents },
+  ];
   return (
     <div className="space-y-5">
-      <section className="rounded-xl border border-line bg-surface p-5">
-        <p className="text-sm text-muted">Kapitalkonto (Einlagen − Entnahmen + Gewinnanteile)</p>
-        <p className="mt-1 text-4xl font-semibold tabular">{formatCents(p.capitalCents)}</p>
-      </section>
-      <Section title="Bewegungen" flush>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {cards.map((c) => (
+          <section key={c.label} className={`rounded-xl border bg-surface p-4 ${c.accent ? "border-amber-400" : "border-line"}`}>
+            <p className="text-sm text-muted">{c.label}</p>
+            <p className="mt-1 text-2xl font-semibold tabular">{formatCents(c.cents)}</p>
+            <p className="mt-1 text-xs text-muted">{c.hint}</p>
+          </section>
+        ))}
+      </div>
+      <Section title={t("pb.new")}>
+        <SelfBookingForm today={todayKey()} />
+      </Section>
+      <Section title={t("pb.list")} flush>
+        <PartnerBookingList rows={p.bookings} />
+      </Section>
+      <Section title={t("pb.ledger")} flush>
         <LedgerList rows={p.entries} mode="both" />
       </Section>
     </div>

@@ -5,7 +5,8 @@ export type LedgerType =
   | "RECEIPT" | "ADJUSTMENT" | "RETURN" | "REVERSAL"
   | "CASH_WITHDRAWAL" | "ACCOUNT_ADJUST"
   | "EMPLOYEE_OUTLAY" | "OUTLAY_REPAY"
-  | "PARTNER_DEPOSIT" | "PARTNER_DRAW" | "PARTNER_PROFIT";
+  | "PARTNER_DEPOSIT" | "PARTNER_DRAW" | "PARTNER_PROFIT"
+  | "PARTNER_OUTLAY" | "PARTNER_OUTLAY_REFUND" | "PARTNER_EXPENSE";
 
 export interface Deltas {
   poolDeltaCents: number;
@@ -63,6 +64,12 @@ export function deltasFor(
       return { ...zero, ...splitPool(-amountCents, account), partnerDeltaCents: -amountCents, accountKind: account };
     case "PARTNER_PROFIT":
       return { ...zero, ...splitPool(-amountCents, account), partnerDeltaCents: amountCents, accountKind: account };
+    case "PARTNER_OUTLAY":
+      return { ...zero, poolDeltaCents: 0, cashDeltaCents: 0, bankDeltaCents: 0, claimDeltaCents: amountCents };
+    case "PARTNER_OUTLAY_REFUND":
+      return { ...zero, ...splitPool(-amountCents, account), claimDeltaCents: -amountCents, accountKind: account };
+    case "PARTNER_EXPENSE":
+      return { ...zero, ...splitPool(-amountCents, account), accountKind: account };
   }
 }
 
@@ -81,6 +88,7 @@ export function reversalDeltas(original: Deltas): Deltas {
 export const DIRECTLY_REVERSIBLE: LedgerType[] = [
   "INCOME_MANUAL", "ALLOCATION", "ADJUSTMENT", "RETURN", "CASH_WITHDRAWAL", "ACCOUNT_ADJUST",
   "EMPLOYEE_OUTLAY", "OUTLAY_REPAY", "PARTNER_DEPOSIT", "PARTNER_DRAW", "PARTNER_PROFIT",
+  "PARTNER_OUTLAY", "PARTNER_OUTLAY_REFUND", "PARTNER_EXPENSE",
 ];
 
 export function assertNonNegative(balanceAfter: number, msg: string) {
@@ -102,4 +110,7 @@ export const LEDGER_LABEL: Record<LedgerType, string> = {
   PARTNER_DEPOSIT: "Gesellschafter-Einlage",
   PARTNER_DRAW: "Gesellschafter-Entnahme",
   PARTNER_PROFIT: "Gewinnanteil",
+  PARTNER_OUTLAY: "Vorgelegtes Geld (Gesellschafter)",
+  PARTNER_OUTLAY_REFUND: "Auslagen-Erstattung (Gesellschafter)",
+  PARTNER_EXPENSE: "Ausgabe Gesellschafter (Firmenmittel)",
 };
