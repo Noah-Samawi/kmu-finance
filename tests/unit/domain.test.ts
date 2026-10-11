@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { centsToPlain, formatCents, parseEuroToCents, roundHalfAway } from "@/domain/money";
-import { calcInvoice, calcLine, displayStatus, formatInvoiceNumber, quantityToMilli, vatBreakdown } from "@/domain/invoice";
+import { calcInvoice, calcLine, displayStatus, formatInvoiceNumber, parseVatRate, quantityToMilli, vatBreakdown } from "@/domain/invoice";
 import { deltasFor, reversalDeltas } from "@/domain/ledger";
 import { dayRange, monthRange } from "@/domain/period";
 
@@ -52,6 +52,20 @@ describe("invoice", () => {
     expect(displayStatus("OPEN", new Date("2026-10-05T10:00:00Z"), now)).toBe("OVERDUE");
     expect(displayStatus("OPEN", new Date("2026-10-06T10:00:00Z"), now)).toBe("OPEN");
     expect(displayStatus("PAID", new Date("2026-01-01"), now)).toBe("PAID");
+  });
+  it("parst USt. als Prozent oder Basispunkte", () => {
+    expect(parseVatRate(0)).toBe(0);
+    expect(parseVatRate(7)).toBe(700);
+    expect(parseVatRate("19")).toBe(1900);
+    expect(parseVatRate(20)).toBe(2000);
+    expect(parseVatRate(1900)).toBe(1900);
+    expect(parseVatRate("0")).toBe(0);
+  });
+  it("Netto × Satz = Steuer, Netto + Steuer = Brutto", () => {
+    const r = calcInvoice([{ description: "Buffet", quantity: "20", unit: "Pers.", unitPriceCents: 1800, vatRate: 1900 }], false);
+    expect(r.netCents).toBe(36000);
+    expect(r.vatCents).toBe(6840);
+    expect(r.grossCents).toBe(42840);
   });
 });
 

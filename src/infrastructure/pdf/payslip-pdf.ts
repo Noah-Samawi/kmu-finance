@@ -42,36 +42,34 @@ export async function renderPayslipPdf(p: PayslipPdfInput) {
   const hours = p.hoursWorked ?? 0;
   const rate = p.hourlyRateCents ?? 0;
   const wageLine = hours > 0 && rate > 0;
-  const addr = [p.employer.legalName || p.employer.name, p.employer.street, [p.employer.zip, p.employer.city].filter(Boolean).join(" ")].filter((x): x is string => !!x);
+  const firm = p.employer.legalName || p.employer.name;
 
-  w.line(addr[0] ?? p.employer.name, { size: 11, bold: true });
-  for (const l of addr.slice(1)) w.line(l, { size: 8, color: [0.3, 0.3, 0.34] });
+  w.y = A4.h - 42;
+  w.line("Abrechnung der Brutto/Netto-Bezüge", { size: 12, bold: true, width: 300 });
+  w.line(`für ${period}`, { size: 10, width: 300 });
+  w.line(firm, { size: 8, color: [0.3, 0.3, 0.34], width: 300 });
+  if (p.employer.street) w.line(p.employer.street, { size: 8, color: [0.3, 0.3, 0.34], width: 300 });
+  if (p.employer.zip || p.employer.city) {
+    w.line([p.employer.zip, p.employer.city].filter(Boolean).join(" "), { size: 8, color: [0.3, 0.3, 0.34], width: 300 });
+  }
 
-  const saveY = w.y;
-  w.y = A4.h - MARGIN;
-  w.text("Entgeltabrechnung", { x: 330, size: 14, bold: true, align: "right", width: width - 280 });
-  w.y -= 16;
-  w.text(`nach § 108 GewO`, { x: 330, size: 7, color: [0.4, 0.4, 0.45], align: "right", width: width - 280 });
-  w.y -= 12;
-  w.text(period, { x: 330, size: 11, bold: true, align: "right", width: width - 280 });
-  w.y = Math.min(saveY, w.y) - 8;
-  w.hr(10);
+  w.y -= 8;
+  w.line(p.employeeName, { size: 11, bold: true, width: width });
+  if (p.employeeStreet) w.line(p.employeeStreet, { size: 9, width: width });
+  if (p.employeeZip || p.employeeCity) {
+    w.line(`${p.employeeZip ?? ""} ${p.employeeCity ?? ""}`.trim(), { size: 9, width: width });
+  }
+  w.y -= 8;
 
-  w.line("Arbeitnehmer", { size: 8, bold: true });
-  w.line(p.employeeName, { size: 10, bold: true });
-  if (p.employeeStreet) w.line(p.employeeStreet, { size: 9 });
-  if (p.employeeZip || p.employeeCity) w.line(`${p.employeeZip ?? ""} ${p.employeeCity ?? ""}`.trim(), { size: 9 });
-  w.y -= 6;
-
-  w.tableBoxed(
+  w.tableOpen(
     [
-      { title: "Personal-Nr.", width: 78 },
-      { title: "Geburtsdatum", width: 72 },
+      { title: "Pers.-Nr.", width: 72 },
+      { title: "Geburtsdatum", width: 78 },
       { title: "Eintritt", width: 72 },
       { title: "StKl", width: 36 },
       { title: "KiFb", width: 36 },
-      { title: "PGRS", width: 40 },
-      { title: "BGRS", width: width - 334 },
+      { title: "PGRS", width: 44 },
+      { title: "BGRS", width: width - 338 },
     ],
     [[
       p.personnelNumber || "–",
@@ -84,126 +82,116 @@ export async function renderPayslipPdf(p: PayslipPdfInput) {
     ]],
     7,
   );
-  w.y -= 4;
-  w.tableBoxed(
+  w.y -= 2;
+  w.tableOpen(
     [
       { title: "SV-Nummer", width: 120 },
-      { title: "IdNr.", width: 110 },
-      { title: "Krankenkasse", width: 140 },
-      { title: "Kirchensteuer", width: width - 370 },
+      { title: "Steuer-ID", width: 110 },
+      { title: "Krankenkasse", width: 150 },
+      { title: "Konfession", width: width - 380 },
     ],
     [[p.socialSecurityNumber || "–", p.taxId || "–", p.healthInsuranceName || "–", church]],
     7,
   );
-  w.y -= 8;
+  w.y -= 10;
 
-  w.line("Brutto-Bezüge", { size: 10, bold: true });
-  w.tableBoxed(
+  w.line("Brutto-Bezüge", { size: 10, bold: true, width });
+  w.tableOpen(
     [
-      { title: "Lohnart", width: 220 },
+      { title: "Lohnart", width: 70 },
+      { title: "Bezeichnung", width: 150 },
       { title: "Menge", width: 70, align: "right" },
       { title: "Faktor", width: 90, align: "right" },
       { title: "Betrag", width: width - 380, align: "right" },
     ],
     [
       wageLine
-        ? ["001 Zeitlohn Std.", qty(hours), formatCents(rate), formatCents(p.grossCents)]
-        : ["001 Gehalt", "1,00", formatCents(p.grossCents), formatCents(p.grossCents)],
-      ["Gesamt-Brutto", "", "", formatCents(p.grossCents)],
-    ],
-    8,
-  );
-  w.y -= 10;
-
-  w.line("Steuer und Sozialversicherung", { size: 10, bold: true });
-  const half = (width - 12) / 2;
-  const taxRows = [
-    ["Steuer-Brutto", formatCents(p.taxGrossCents)],
-    ["Lohnsteuer", formatCents(-p.wageTaxCents)],
-    ["SolZ", formatCents(-p.soliCents)],
-    ["Kirchensteuer", formatCents(-p.churchTaxCents)],
-    ["Steuerrechtliche Abzüge", formatCents(-p.taxDeductionCents)],
-  ];
-  const svRows = [
-    ["SV-Brutto KV/PV", formatCents(p.svGrossCents)],
-    [`KV AN (inkl. Zusatz)`, formatCents(-p.kvCents)],
-    ["RV AN", formatCents(-p.rvCents)],
-    ["AV AN", formatCents(-p.avCents)],
-    ["PV AN", formatCents(-p.pvCents)],
-    ["SV-rechtliche Abzüge", formatCents(-p.svDeductionCents)],
-  ];
-  const blockY = w.y;
-  drawMiniTable(w, MARGIN, blockY, half, "Steuer", taxRows);
-  drawMiniTable(w, MARGIN + half + 12, blockY, half, "Sozialversicherung AN", svRows);
-  w.y = blockY - 16 * Math.max(taxRows.length, svRows.length) - 28;
-
-  w.line("Berechnung und Auszahlung", { size: 10, bold: true });
-  w.tableBoxed(
-    [{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }],
-    [
-      ["Gesamt-Brutto", formatCents(p.grossCents)],
-      ["./. Steuerrechtliche Abzüge", formatCents(-p.taxDeductionCents)],
-      ["./. SV-rechtliche Abzüge", formatCents(-p.svDeductionCents)],
-      ["= Netto-Verdienst", formatCents(p.netCents)],
-      ["+/- Netto-Bezüge / Netto-Abzüge", formatCents(0)],
+        ? ["001", "Zeitlohn Std.", qty(hours), formatCents(rate), formatCents(p.grossCents)]
+        : ["001", "Gehalt", "1,00", formatCents(p.grossCents), formatCents(p.grossCents)],
     ],
     8,
   );
   w.y -= 8;
-  w.ensureSpace(36);
-  w.fillRect(MARGIN, w.y - 10, width, 28, [0.12, 0.22, 0.38]);
-  w.text("AUSZAHLUNGSBETRAG", { x: MARGIN + 8, size: 10, bold: true, color: [1, 1, 1] });
-  w.text(formatCents(p.payoutCents), { x: MARGIN, size: 12, bold: true, color: [1, 1, 1], align: "right", width });
-  w.y -= 36;
 
-  w.line("Arbeitgeber-Kosten (nicht auszahlungsrelevant)", { size: 8, bold: true, color: [0.35, 0.35, 0.4] });
-  w.tableBoxed(
+  w.line("Steuerrechtliche Abzüge", { size: 10, bold: true, width });
+  w.tableOpen(
     [
-      { title: "SV-AG", width: 110 },
-      { title: "KV", width: 80, align: "right" },
-      { title: "RV", width: 80, align: "right" },
-      { title: "AV", width: 80, align: "right" },
-      { title: "PV", width: width - 350, align: "right" },
+      { title: "Steuer-Brutto", width: 110, align: "right" },
+      { title: "Lohnsteuer", width: 110, align: "right" },
+      { title: "SolZ", width: 90, align: "right" },
+      { title: "Kirchensteuer", width: width - 310, align: "right" },
     ],
     [[
-      formatCents(p.employerSvCents),
+      formatCents(p.taxGrossCents),
+      formatCents(p.wageTaxCents),
+      formatCents(p.soliCents),
+      formatCents(p.churchTaxCents),
+    ]],
+    8,
+  );
+  w.y -= 8;
+
+  w.line("SV-rechtliche Abzüge (Arbeitnehmer)", { size: 10, bold: true, width });
+  w.tableOpen(
+    [
+      { title: "SV-Brutto", width: 90, align: "right" },
+      { title: "KV AN", width: 80, align: "right" },
+      { title: "RV AN", width: 80, align: "right" },
+      { title: "AV AN", width: 80, align: "right" },
+      { title: "PV AN", width: width - 330, align: "right" },
+    ],
+    [[
+      formatCents(p.svGrossCents),
+      formatCents(p.kvCents),
+      formatCents(p.rvCents),
+      formatCents(p.avCents),
+      formatCents(p.pvCents),
+    ]],
+    8,
+  );
+  w.y -= 8;
+
+  w.line("Berechnung", { size: 10, bold: true, width });
+  w.tableOpen(
+    [{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }],
+    [
+      ["Gesamt-Brutto", formatCents(p.grossCents)],
+      ["Steuerrechtliche Abzüge", formatCents(-p.taxDeductionCents)],
+      ["SV-rechtliche Abzüge", formatCents(-p.svDeductionCents)],
+      ["Netto-Verdienst", formatCents(p.netCents)],
+    ],
+    8,
+  );
+  w.y -= 10;
+  w.ensureSpace(32);
+  w.fillRect(MARGIN, w.y - 8, width, 24, [0.12, 0.12, 0.14]);
+  w.text("Auszahlungsbetrag", { x: MARGIN + 8, size: 10, bold: true, color: [1, 1, 1] });
+  w.text(formatCents(p.payoutCents), { x: MARGIN, size: 11, bold: true, color: [1, 1, 1], align: "right", width });
+  w.y -= 34;
+
+  w.line("Arbeitgeber (SV-AG-Anteil / Gesamtkosten)", { size: 9, bold: true, width });
+  w.tableOpen(
+    [
+      { title: "KV AG", width: 90, align: "right" },
+      { title: "RV AG", width: 90, align: "right" },
+      { title: "AV AG", width: 90, align: "right" },
+      { title: "PV AG", width: 90, align: "right" },
+      { title: "Gesamtkosten", width: width - 360, align: "right" },
+    ],
+    [[
       formatCents(p.kvAgCents),
       formatCents(p.rvAgCents),
       formatCents(p.avAgCents),
       formatCents(p.pvAgCents),
+      formatCents(p.employerCostCents),
     ]],
     8,
   );
-  w.y -= 4;
-  w.line(`Gesamtkosten Arbeitgeber: ${formatCents(p.employerCostCents)}`, { size: 9, bold: true });
-  const payTo = [p.iban && `IBAN ${p.iban}`, p.bic && `BIC ${p.bic}`].filter(Boolean).join("  ·  ");
-  if (payTo) w.line(`Auszahlung auf: ${payTo}`, { size: 8 });
   w.y -= 6;
-  w.paragraph("Gesetzesnahe Näherung (SV 2026, ESt-Tarif 2025). Kein Ersatz für die Abrechnung durch ein Lohnbüro.", width, { size: 7 });
+  const payTo = [p.iban && `IBAN ${p.iban}`, p.bic && `BIC ${p.bic}`].filter(Boolean).join("   ");
+  if (payTo) w.line(`Auszahlung: ${payTo}`, { size: 8, width });
+  w.line("Entgeltbescheinigung nach § 108 Abs. 3 Satz 1 GewO. Gesetzesnahe Näherung (SV 2026 / ESt 2025).", { size: 7, color: [0.4, 0.4, 0.45], width });
 
-  w.footerOnAllPages("", [
-    `${p.employer.legalName || p.employer.name} · Entgeltabrechnung ${period}`,
-    "Entgeltabrechnung gemäß § 108 GewO",
-  ]);
+  w.footerOnAllPages("", [`${firm} · Entgeltabrechnung ${period}`]);
   return w.save();
-}
-
-function drawMiniTable(w: PdfWriter, x: number, topY: number, colW: number, title: string, rows: string[][]) {
-  const rowH = 14;
-  const headerH = 16;
-  w.y = topY;
-  w.page.drawRectangle({
-    x, y: topY - headerH + 4, width: colW, height: headerH,
-    color: undefined as never,
-  });
-  w.fillRect(x, topY - headerH + 6, colW, headerH, [0.93, 0.94, 0.96]);
-  w.text(title, { x: x + 4, size: 8, bold: true });
-  let y = topY - headerH - 4;
-  rows.forEach(([a, b], i) => {
-    const last = i === rows.length - 1;
-    w.y = y;
-    w.text(a, { x: x + 4, size: last ? 8 : 7.5, bold: last });
-    w.text(b, { x, size: last ? 8 : 7.5, bold: last, align: "right", width: colW - 4 });
-    y -= rowH;
-  });
 }

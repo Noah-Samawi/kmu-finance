@@ -29,6 +29,13 @@
       "when": 1791800000000,
       "tag": "0003_outlay_partners",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791900000000,
+      "tag": "0004_invoice_contact",
+      "breakpoints": true
     }
   ]
 }

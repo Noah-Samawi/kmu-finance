@@ -35,7 +35,15 @@ export class PdfWriter {
   }
 
   ensureSpace(h: number) {
-    if (this.y - h < MARGIN + 20) this.newPage();
+    if (this.y - h < 78) this.newPage();
+  }
+
+  hLine(x1: number, x2: number, y?: number) {
+    const yy = y ?? this.y + 4;
+    this.page.drawLine({
+      start: { x: x1, y: yy }, end: { x: x2, y: yy },
+      thickness: 0.7, color: rgb(0.15, 0.15, 0.18),
+    });
   }
 
   text(t: string, opts: { x?: number; size?: number; bold?: boolean; color?: [number, number, number]; align?: "left" | "right"; width?: number } = {}) {
@@ -49,6 +57,15 @@ export class PdfWriter {
 
   line(text: string, opts: Parameters<PdfWriter["text"]>[1] = {}) {
     const size = opts.size ?? 10;
+    const maxW = opts.width;
+    if (maxW && opts.align !== "right") {
+      for (const l of this.wrap(text, maxW, size, opts.bold ? this.bold : this.font)) {
+        this.ensureSpace(size + 4);
+        this.text(l, { ...opts, width: undefined });
+        this.y -= size + 4;
+      }
+      return;
+    }
     this.ensureSpace(size + 4);
     this.text(text, opts);
     this.y -= size + 4;
@@ -161,6 +178,48 @@ export class PdfWriter {
       return await this.doc.embedPng(bytes);
     } catch {
       return this.doc.embedJpg(bytes);
+    }
+  }
+
+  /** Tabelle nur mit Kopf-Unterstreichung, ohne vertikale Gitterlinien (keine Striche durch Text). */
+  tableOpen(cols: { title: string; width: number; align?: "left" | "right" }[], rows: string[][], size = 9) {
+    const rowH = size + 8;
+    const totalW = cols.reduce((s, c) => s + c.width, 0);
+    const header = () => {
+      this.ensureSpace(rowH + 10);
+      this.fillRect(MARGIN, this.y - 5, totalW, rowH, [0.12, 0.12, 0.14]);
+      let x = MARGIN;
+      for (const c of cols) {
+        this.text(c.title, { x: x + 4, size, bold: true, color: [1, 1, 1], align: c.align, width: c.width - 8 });
+        x += c.width;
+      }
+      this.y -= rowH + 4;
+    };
+    header();
+    for (const r of rows) {
+      const wrapped = r.map((cell, i) => this.wrap(cell ?? "", cols[i].width - 8, size));
+      const lines = Math.max(1, ...wrapped.map((w) => w.length));
+      if (this.y - rowH * lines < 80) {
+        this.newPage();
+        header();
+      }
+      const top = this.y;
+      for (let li = 0; li < lines; li++) {
+        let x = MARGIN;
+        cols.forEach((c, i) => {
+          const t = wrapped[i][li];
+          if (t) this.text(t, { x: x + 4, size, align: c.align, width: c.width - 8 });
+          x += c.width;
+        });
+        this.y -= rowH - 2;
+      }
+      this.page.drawLine({
+        start: { x: MARGIN, y: this.y + 4 },
+        end: { x: MARGIN + totalW, y: this.y + 4 },
+        thickness: 0.3, color: rgb(0.82, 0.82, 0.84),
+      });
+      this.y -= 4;
+      void top;
     }
   }
 

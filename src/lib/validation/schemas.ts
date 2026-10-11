@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { parseEuroToCents } from "@/domain/money";
-import { isAllowedVatRate } from "@/domain/invoice";
+import { parseVatRate } from "@/domain/invoice";
 
 // Gemeinsame Zod-Schemas für Client und Server.
 
@@ -118,6 +118,9 @@ export const letterheadSchema = z.object({
   defaultPaymentDays: z.coerce.number().int().min(0).max(120).optional(),
   invoiceFooter: optStr(2000),
   defaultPaymentMethod: z.enum(["TRANSFER", "CASH"]).optional(),
+  bankName: optStr(120),
+  invoiceEmail: optStr(200),
+  website: optStr(200),
   logoDataUrl: z.string().max(2_000_000).optional().nullable(),
 });
 
@@ -145,9 +148,14 @@ export const invoiceItemSchema = z.object({
     .refine((v) => /^\d+(\.\d{1,3})?$/.test(v) && Number(v) > 0, "Menge > 0, max. 3 Nachkommastellen"),
   unit: z.string().trim().min(1).max(20).default("Stk"),
   unitPriceCents: positiveAmount,
-  vatRate: z.coerce.number().int()
-    .transform((n) => (n >= 0 && n <= 20 ? n * 100 : n))
-    .refine(isAllowedVatRate, "USt.-Satz: 0 % bis 20 %"),
+  vatRate: z.any().transform((v, ctx) => {
+    try {
+      return parseVatRate(v);
+    } catch (e) {
+      ctx.addIssue({ code: "custom", message: (e as Error).message });
+      return z.NEVER;
+    }
+  }),
 });
 
 export const invoiceDraftSchema = z.object({
@@ -223,9 +231,16 @@ export const receiptFieldsSchema = z.object({
   receiptDate: dateStr,
   asOutlay: z.union([z.boolean(), z.string()]).optional()
     .transform((v) => v === true || v === "true" || v === "1" || v === "on"),
-  vatRate: z.coerce.number().int().optional().nullable()
-    .transform((v) => (v == null || Number.isNaN(v) ? null : v <= 20 ? v * 100 : v))
-    .refine((v) => v == null || isAllowedVatRate(v), "USt.-Satz: 0 % bis 20 %"),
+  vatRate: z.any().optional().nullable()
+    .transform((v, ctx) => {
+      if (v == null || v === "" || Number.isNaN(v)) return null;
+      try {
+        return parseVatRate(v);
+      } catch (e) {
+        ctx.addIssue({ code: "custom", message: (e as Error).message });
+        return z.NEVER;
+      }
+    }),
 });
 
 export const reviewSchema = z.discriminatedUnion("action", [

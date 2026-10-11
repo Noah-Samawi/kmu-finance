@@ -75,6 +75,9 @@ export const tenants = pgTable("Tenant", {
   logoKey: text("logoKey"),
   invoiceFooter: text("invoiceFooter"),
   defaultPaymentMethod: paymentMethodEnum("defaultPaymentMethod").notNull().default("TRANSFER"),
+  bankName: text("bankName"),
+  invoiceEmail: text("invoiceEmail"),
+  website: text("website"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

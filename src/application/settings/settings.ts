@@ -20,6 +20,7 @@ export async function updateLetterhead(ctx: Ctx, input: z.infer<typeof letterhea
   const keys = [
     "legalName", "street", "zip", "city", "taxNumber", "vatId", "iban", "bic",
     "invoicePrefix", "defaultPaymentDays", "invoiceFooter", "defaultPaymentMethod",
+    "bankName", "invoiceEmail", "website",
   ] as const;
   for (const k of keys) {
     if (input[k] !== undefined) (patch as Record<string, unknown>)[k] = input[k];

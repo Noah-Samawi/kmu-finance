@@ -11,6 +11,18 @@ export function isAllowedVatRate(bp: number): boolean {
   return Number.isInteger(bp) && bp >= 0 && bp <= 2000 && bp % 100 === 0;
 }
 
+/** Eingabe als Prozent (0–20) oder Basispunkte (0–2000) → Basispunkte. */
+export function parseVatRate(v: unknown): number {
+  if (v === "" || v == null) throw new Error("USt.-Satz fehlt");
+  const n = typeof v === "number" ? v : Number(String(v).replace("%", "").replace(",", ".").trim());
+  if (!Number.isFinite(n)) throw new Error("Ungültiger USt.-Satz");
+  const bp = n >= 0 && n <= 20 ? Math.round(n * 100) : Math.round(n);
+  if (!isAllowedVatRate(bp)) throw new Error("USt.-Satz: 0 % bis 20 %");
+  return bp;
+}
+
+export const COMMON_VAT_RATES = [0, 700, 1900, 2000] as const;
+
 export interface LineInput {
   description: string;
   quantity: string; // Dezimal als String, max. 3 Nachkommastellen ("2.5")

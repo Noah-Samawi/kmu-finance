@@ -9,6 +9,7 @@ export function LetterheadForm({ tenant }: { tenant: {
   taxNumber: string | null; vatId: string | null; iban: string | null; bic: string | null;
   invoicePrefix: string; defaultPaymentDays: number; invoiceFooter: string | null;
   defaultPaymentMethod: "TRANSFER" | "CASH"; logoKey: string | null;
+  bankName?: string | null; invoiceEmail?: string | null; website?: string | null;
 } }) {
   const { call, busy, error } = useApi();
   const [logo, setLogo] = useState(tenant.logoKey ?? "");
@@ -22,6 +23,7 @@ export function LetterheadForm({ tenant }: { tenant: {
         taxNumber: f.taxNumber || null, vatId: f.vatId || null, iban: f.iban || null, bic: f.bic || null,
         invoicePrefix: f.invoicePrefix, defaultPaymentDays: Number(f.defaultPaymentDays),
         invoiceFooter: f.invoiceFooter || null, defaultPaymentMethod: f.defaultPaymentMethod,
+        bankName: f.bankName || null, invoiceEmail: f.invoiceEmail || null, website: f.website || null,
         logoDataUrl: logo || null,
       });
     }}>
@@ -33,8 +35,11 @@ export function LetterheadForm({ tenant }: { tenant: {
       </Field>
       <Field label="Steuernummer"><input name="taxNumber" defaultValue={tenant.taxNumber ?? ""} className={inputCls} /></Field>
       <Field label="USt-IdNr."><input name="vatId" defaultValue={tenant.vatId ?? ""} className={inputCls} /></Field>
+      <Field label="Bank"><input name="bankName" defaultValue={tenant.bankName ?? ""} className={inputCls} /></Field>
       <Field label="IBAN"><input name="iban" defaultValue={tenant.iban ?? ""} className={inputCls} /></Field>
       <Field label="BIC"><input name="bic" defaultValue={tenant.bic ?? ""} className={inputCls} /></Field>
+      <Field label="E-Mail (Rechnung)"><input name="invoiceEmail" type="email" defaultValue={tenant.invoiceEmail ?? ""} className={inputCls} /></Field>
+      <Field label="Web"><input name="website" defaultValue={tenant.website ?? ""} className={inputCls} placeholder="https://…" /></Field>
       <Field label="Rechnungspräfix"><input name="invoicePrefix" defaultValue={tenant.invoicePrefix} className={inputCls} /></Field>
       <Field label="Zahlungsziel (Tage)"><input name="defaultPaymentDays" type="number" defaultValue={tenant.defaultPaymentDays} className={inputCls} /></Field>
       <Field label="Standard-Zahlungsart">
