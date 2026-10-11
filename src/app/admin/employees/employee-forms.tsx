@@ -26,29 +26,38 @@ export function CreateEmployeeForm() {
 
 export function ResetBudgetButton({ id, balanceCents }: { id: string; balanceCents: number }) {
   const { call, busy, error } = useApi();
+  const [open, setOpen] = useState(false);
   if (balanceCents <= 0) return null;
   return (
     <div className="space-y-2">
-      <button
-        type="button"
-        disabled={busy}
-        className={cx(btn.base, btn.danger, btn.sm)}
-        onClick={async (e) => {
+      {!open ? (
+        <button type="button" className={cx(btn.base, btn.danger, btn.sm)} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(true); }}>
+          Budget auf 0,00 € setzen
+        </button>
+      ) : (
+        <form className="space-y-2 rounded-lg border border-minus/30 p-3" onSubmit={async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (!confirm(`Guthaben von ${formatCents(balanceCents)} auf 0,00 € setzen? Das wird als Ausgleich ohne Beleg gebucht.`)) return;
-          await call("POST", `/api/v1/employees/${id}/reset-budget`);
-        }}
-      >
-        {busy ? "Wird gesetzt …" : "Budget auf 0,00 € setzen"}
-      </button>
+          const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+          if (await call("POST", `/api/v1/employees/${id}/reset-budget`, { description: f.description })) setOpen(false);
+        }}>
+          <p className="text-sm">Guthaben {formatCents(balanceCents)} auf 0,00 € setzen.</p>
+          <Field label="Wofür? (Pflicht)"><input name="description" required minLength={3} className={inputCls} dir="auto" placeholder="Begründung" /></Field>
+          <div className="flex gap-2">
+            <button disabled={busy} className={cx(btn.base, btn.danger, btn.sm)}>Bestätigen</button>
+            <button type="button" className={cx(btn.base, btn.secondary, btn.sm)} onClick={() => setOpen(false)}>Abbrechen</button>
+          </div>
+        </form>
+      )}
       <ErrorNote error={error} />
     </div>
   );
 }
 
 /** Ausgleich, Rückführung, Sperren, Passwort */
-export function WalletActions({ id, balanceCents, isActive }: { id: string; balanceCents: number; isActive: boolean }) {
+export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense, cashCents, bankCents }: {
+  id: string; balanceCents: number; isActive: boolean; canEnterCashExpense?: boolean; cashCents?: number; bankCents?: number;
+}) {
   const { call, busy, error } = useApi();
   const [mode, setMode] = useState<null | "adjust" | "return" | "password">(null);
   const toggle = (m: typeof mode) => setMode(mode === m ? null : m);
@@ -67,6 +76,10 @@ export function WalletActions({ id, balanceCents, isActive }: { id: string; bala
           }}>
           {isActive ? "Zugang sperren" : "Zugang freischalten"}
         </button>
+        <button disabled={busy} className={cx(btn.base, btn.secondary, btn.sm)}
+          onClick={() => call("PATCH", `/api/v1/employees/${id}`, { canEnterCashExpense: !canEnterCashExpense })}>
+          {canEnterCashExpense ? "Barausgabe durch MA sperren" : "Barausgabe durch MA erlauben"}
+        </button>
       </div>
 
       {mode === "adjust" && (
@@ -82,7 +95,7 @@ export function WalletActions({ id, balanceCents, isActive }: { id: string; bala
             <label className="flex items-center gap-2"><input type="radio" name="kind" value="amount" className="accent-[var(--color-ledger)]" /> Betrag:</label>
             <input name="amount" inputMode="decimal" placeholder="0,00" className={cx(inputCls, "h-9 w-28 text-right")} />
           </div>
-          <Field label="Begründung"><input name="description" required minLength={3} className={inputCls} placeholder="z. B. Parkgebühren ohne Beleg" /></Field>
+          <Field label="Wofür? (Pflicht)"><input name="description" required minLength={3} className={inputCls} dir="auto" placeholder="z. B. Parkgebühren ohne Beleg" /></Field>
           <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Ausgleich buchen</button>
         </form>
       )}
@@ -90,10 +103,19 @@ export function WalletActions({ id, balanceCents, isActive }: { id: string; bala
         <form className="space-y-3 rounded-lg border border-line bg-paper p-3" onSubmit={async (e) => {
           e.preventDefault();
           const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
-          if (await call("POST", `/api/v1/employees/${id}/return`, f.amount ? { amountCents: f.amount } : { all: true })) setMode(null);
+          if (await call("POST", `/api/v1/employees/${id}/return`, {
+            amountCents: f.amount || undefined, all: !f.amount, accountKind: f.accountKind, description: f.description,
+          })) setMode(null);
         }}>
-          <p className="text-sm text-muted">Bargeld, das der Mitarbeiter zurückgibt, fließt wieder in den Kassenbestand.</p>
+          <p className="text-sm text-muted">Restgeld wird dem Herkunftskonto (Kasse oder Bank) gutgeschrieben, nicht als Ausgabe gebucht.</p>
+          <Field label="Herkunftskonto">
+            <select name="accountKind" className={inputCls} defaultValue="CASH">
+              <option value="CASH">Kasse (Bar){cashCents != null ? ` · ${formatCents(cashCents)}` : ""}</option>
+              <option value="BANK">Bankkonto{bankCents != null ? ` · ${formatCents(bankCents)}` : ""}</option>
+            </select>
+          </Field>
           <Field label="Betrag" hint="Leer lassen = gesamtes Guthaben"><input name="amount" inputMode="decimal" placeholder={formatCents(balanceCents)} className={cx(inputCls, "text-right")} /></Field>
+          <Field label="Wofür? (Pflicht)"><input name="description" required minLength={3} className={inputCls} dir="auto" /></Field>
           <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Rückgabe buchen</button>
         </form>
       )}

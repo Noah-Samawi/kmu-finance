@@ -163,11 +163,11 @@ async function main() {
 
   const adj = await A.post(`/api/v1/employees/${e1}/adjust`, { amountCents: "1.000,00", description: "zu viel" });
   check(adj.status === 422, "Ausgleich über Guthaben blockiert");
-  const zero = await A.post(`/api/v1/employees/${e1}/reset-budget`);
+  const zero = await A.post(`/api/v1/employees/${e1}/reset-budget`, { description: "Barzahlung ohne Quittung" });
   check(zero.data.walletBalanceCents === 0, "Admin setzt Budget auf 0,00 €");
 
-  await A.post("/api/v1/pool/allocations", { employeeId: e2, amountCents: 5000 });
-  const ret = await A.post(`/api/v1/employees/${e2}/return`, { all: true });
+  await A.post("/api/v1/pool/allocations", { employeeId: e2, amountCents: 5000, accountKind: "CASH" });
+  const ret = await A.post(`/api/v1/employees/${e2}/return`, { all: true, description: "Restgeld zurück", accountKind: "CASH" });
   check(ret.data.walletBalanceCents === 0 && ret.data.poolBalanceCents === 188535, "Rückführung: Restgeld zurück in den Pool");
 
   const alloc = (await A.post("/api/v1/pool/allocations", { employeeId: e2, amountCents: 1000 })).data.entry;

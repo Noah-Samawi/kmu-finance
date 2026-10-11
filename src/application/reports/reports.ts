@@ -6,7 +6,7 @@ import { invoices, ledgerEntries, periodClosings, receipts, users, type LedgerTy
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "../context";
-import { audit, poolBalance, walletBalance } from "../ledger-service";
+import { audit, bankBalance, cashBalance, poolBalance, walletBalance } from "../ledger-service";
 
 export interface Range { start: Date; end: Date }
 
@@ -20,7 +20,9 @@ const reversed = aliasedTable(ledgerEntries, "reversed");
 
 export interface LedgerRow {
   id: string; type: LedgerType; bookingDate: Date;
-  poolDeltaCents: number; walletDeltaCents: number; description: string | null;
+  poolDeltaCents: number; cashDeltaCents: number; bankDeltaCents: number;
+  accountKind: "CASH" | "BANK" | null;
+  walletDeltaCents: number; description: string | null;
   employeeId: string | null; employeeName: string | null;
   receiptId: string | null; receiptMerchant: string | null; receiptStatus: "SUBMITTED" | "APPROVED" | "REJECTED" | null;
   invoiceId: string | null; invoiceNumber: string | null;
@@ -31,7 +33,10 @@ export interface LedgerRow {
 export async function ledgerRows(tx: Tx, tenantId: string, opts: { range?: Range; employeeId?: string; limit?: number } = {}): Promise<LedgerRow[]> {
   return tx.select({
     id: ledgerEntries.id, type: ledgerEntries.type, bookingDate: ledgerEntries.bookingDate,
-    poolDeltaCents: ledgerEntries.poolDeltaCents, walletDeltaCents: ledgerEntries.walletDeltaCents,
+    poolDeltaCents: ledgerEntries.poolDeltaCents,
+    cashDeltaCents: ledgerEntries.cashDeltaCents, bankDeltaCents: ledgerEntries.bankDeltaCents,
+    accountKind: ledgerEntries.accountKind,
+    walletDeltaCents: ledgerEntries.walletDeltaCents,
     description: ledgerEntries.description, employeeId: ledgerEntries.employeeId, employeeName: users.name,
     receiptId: ledgerEntries.receiptId, receiptMerchant: receipts.merchant, receiptStatus: receipts.status,
     invoiceId: ledgerEntries.invoiceId, invoiceNumber: invoices.number,
@@ -63,6 +68,8 @@ export interface EmployeeSummary {
 export interface Summary {
   from: string; to: string;
   pool: { openingCents: number; incomeInvoiceCents: number; incomeManualCents: number; allocatedCents: number; returnedCents: number; closingCents: number };
+  cash: { openingCents: number; closingCents: number };
+  bank: { openingCents: number; closingCents: number };
   totals: { receiptsCents: number; adjustmentsCents: number; walletsOpenCents: number };
   employees: EmployeeSummary[];
   entryCount: number;
@@ -103,6 +110,8 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
   }
 
   const poolOpening = onlyEmployeeId ? 0 : await poolBalance(tx, tenantId, range.start);
+  const cashOpening = onlyEmployeeId ? 0 : await cashBalance(tx, tenantId, range.start);
+  const bankOpening = onlyEmployeeId ? 0 : await bankBalance(tx, tenantId, range.start);
   const pool = {
     openingCents: poolOpening,
     incomeInvoiceCents: onlyEmployeeId ? 0 : sumPool("INCOME_INVOICE"),
@@ -112,9 +121,13 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
     closingCents: 0,
   };
   pool.closingCents = pool.openingCents + pool.incomeInvoiceCents + pool.incomeManualCents - pool.allocatedCents + pool.returnedCents;
+  const cashMove = rows.reduce((s, r) => s + r.cashDeltaCents, 0);
+  const bankMove = rows.reduce((s, r) => s + r.bankDeltaCents, 0);
 
   return {
     from: fromKey, to: toKey, pool,
+    cash: { openingCents: cashOpening, closingCents: cashOpening + cashMove },
+    bank: { openingCents: bankOpening, closingCents: bankOpening + bankMove },
     totals: {
       receiptsCents: employees.reduce((s, e) => s + e.receiptsCents, 0),
       adjustmentsCents: employees.reduce((s, e) => s + e.adjustmentsCents, 0),

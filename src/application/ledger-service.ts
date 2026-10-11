@@ -11,12 +11,30 @@ import { notFound, rule } from "@/domain/errors";
 import { formatCents } from "@/domain/money";
 import type { Ctx } from "./context";
 
-export async function poolBalance(tx: Tx, tenantId: string, before?: Date): Promise<number> {
+async function sumCol(
+  tx: Tx, tenantId: string, col: typeof ledgerEntries.poolDeltaCents | typeof ledgerEntries.cashDeltaCents | typeof ledgerEntries.bankDeltaCents, before?: Date,
+) {
   const [r] = await tx
-    .select({ v: sql<string>`coalesce(sum(${ledgerEntries.poolDeltaCents}), 0)::bigint` })
+    .select({ v: sql<string>`coalesce(sum(${col}), 0)::bigint` })
     .from(ledgerEntries)
     .where(and(eq(ledgerEntries.tenantId, tenantId), before ? lt(ledgerEntries.bookingDate, before) : undefined));
   return Number(r.v);
+}
+
+export async function poolBalance(tx: Tx, tenantId: string, before?: Date): Promise<number> {
+  return sumCol(tx, tenantId, ledgerEntries.poolDeltaCents, before);
+}
+
+export async function cashBalance(tx: Tx, tenantId: string, before?: Date): Promise<number> {
+  return sumCol(tx, tenantId, ledgerEntries.cashDeltaCents, before);
+}
+
+export async function bankBalance(tx: Tx, tenantId: string, before?: Date): Promise<number> {
+  return sumCol(tx, tenantId, ledgerEntries.bankDeltaCents, before);
+}
+
+export async function accountBalance(tx: Tx, tenantId: string, kind: "CASH" | "BANK", before?: Date): Promise<number> {
+  return kind === "CASH" ? cashBalance(tx, tenantId, before) : bankBalance(tx, tenantId, before);
 }
 
 export async function walletBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date): Promise<number> {
@@ -63,6 +81,9 @@ export interface NewEntry {
   type: LedgerType;
   poolDeltaCents: number;
   walletDeltaCents: number;
+  cashDeltaCents?: number;
+  bankDeltaCents?: number;
+  accountKind?: "CASH" | "BANK" | null;
   employeeId?: string | null;
   invoiceId?: string | null;
   receiptId?: string | null;
@@ -74,9 +95,19 @@ export interface NewEntry {
 export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntry) {
   const bookingDate = e.bookingDate ?? new Date();
   await assertPeriodOpen(tx, tenantId, bookingDate);
+  const cashDeltaCents = e.cashDeltaCents ?? (e.accountKind === "BANK" ? 0 : e.poolDeltaCents);
+  const bankDeltaCents = e.bankDeltaCents ?? (e.accountKind === "BANK" ? e.poolDeltaCents : 0);
   const [row] = await tx
     .insert(ledgerEntries)
-    .values({ ...e, bookingDate, tenantId, createdById: ctx.userId })
+    .values({
+      ...e,
+      cashDeltaCents,
+      bankDeltaCents,
+      poolDeltaCents: e.poolDeltaCents || cashDeltaCents + bankDeltaCents,
+      bookingDate,
+      tenantId,
+      createdById: ctx.userId,
+    })
     .returning();
   return row;
 }

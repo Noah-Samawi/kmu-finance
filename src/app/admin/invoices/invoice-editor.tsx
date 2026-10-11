@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { btn, cx, Field, inputCls } from "@/components/ui";
 import { ErrorNote, useApi } from "@/components/use-api";
+import { VatSelect } from "@/components/vat-select";
 import { calcInvoice, calcLine, vatBreakdown } from "@/domain/invoice";
 import { centsToPlain, formatCents, formatVatRate, parseEuroToCents } from "@/domain/money";
 
@@ -113,9 +114,7 @@ export function InvoiceEditor({ contacts, initial, smallBusiness }: {
                     className={cx(inputCls, "text-right tabular", bad && "border-minus")} />
                 </Field>
                 <Field label="USt." className="col-span-3 md:col-span-1">
-                  <select value={smallBusiness ? 0 : it.vatRate} disabled={smallBusiness} onChange={(e) => set(idx, { vatRate: Number(e.target.value) })} className={inputCls}>
-                    <option value={1900}>19 %</option><option value={700}>7 %</option><option value={0}>0 %</option>
-                  </select>
+                  <VatSelect value={smallBusiness ? 0 : it.vatRate} disabled={smallBusiness} onChange={(bp) => set(idx, { vatRate: bp })} />
                 </Field>
                 <div className="col-span-2 self-center text-right md:col-span-1 md:pb-3">
                   <span className="text-xs text-muted md:hidden">Netto </span>

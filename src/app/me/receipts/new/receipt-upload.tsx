@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { btn, cx, Field, inputCls } from "@/components/ui";
 import { ErrorNote, useApi } from "@/components/use-api";
+import { VatSelect } from "@/components/vat-select";
 import { formatCents, parseEuroToCents } from "@/domain/money";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -102,9 +103,7 @@ export function ReceiptUpload({ balanceCents, today }: { balanceCents: number; t
       <div className="grid grid-cols-2 gap-3">
         <Field label="Datum auf dem Bon"><input name="receiptDate" type="date" required max={today} defaultValue={today} className={inputCls} /></Field>
         <Field label="USt. (optional)">
-          <select name="vatRate" className={inputCls} defaultValue="">
-            <option value="">–</option><option value="1900">19 %</option><option value="700">7 %</option><option value="0">0 %</option>
-          </select>
+          <VatSelect name="vatRate" defaultValue="" allowEmpty />
         </Field>
       </div>
       <Field label="Wofür? (optional)"><input name="description" placeholder="z. B. Mehl und Butter" className={inputCls} /></Field>

@@ -14,6 +14,7 @@ export interface AuthUser {
   name: string;
   email: string;
   tenantName: string | null;
+  canEnterCashExpense: boolean;
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -41,7 +42,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
   const rows = await db
     .select({
       userId: users.id, tenantId: users.tenantId, role: users.role, name: users.name,
-      email: users.email, isActive: users.isActive,
+      email: users.email, isActive: users.isActive, canEnterCashExpense: users.canEnterCashExpense,
       tenantName: tenants.name, tenantStatus: tenants.status,
     })
     .from(sessions)
@@ -54,7 +55,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
   if (r.role !== "SUPER_ADMIN" && r.tenantStatus !== "ACTIVE") return null;
   return {
     userId: r.userId, tenantId: r.tenantId, role: r.role, name: r.name,
-    email: r.email, tenantName: r.tenantName,
+    email: r.email, tenantName: r.tenantName, canEnterCashExpense: r.canEnterCashExpense,
   };
 }
 

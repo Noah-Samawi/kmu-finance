@@ -37,7 +37,20 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
   w.hr();
 
   if (!employeeView) {
-    w.line("Einnahmen-Pool", { size: 11, bold: true });
+    w.line("Kasse und Bankkonto", { size: 11, bold: true });
+    w.table(
+      [
+        { title: "Konto", width: 220 },
+        { title: "Anfang", width: 155, align: "right" },
+        { title: "Ende", width: width - 375, align: "right" },
+      ],
+      [
+        ["Kasse (Bar)", formatCents(s.cash.openingCents), formatCents(s.cash.closingCents)],
+        ["Bankkonto", formatCents(s.bank.openingCents), formatCents(s.bank.closingCents)],
+      ],
+    );
+    w.y -= 8;
+    w.line("Einnahmen-Pool (Summe)", { size: 11, bold: true });
     w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
       ["Anfangsbestand", formatCents(s.pool.openingCents)],
       ["+ Einnahmen aus Rechnungen", formatCents(s.pool.incomeInvoiceCents)],

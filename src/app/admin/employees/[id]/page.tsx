@@ -7,8 +7,10 @@ import { PageHeader, Pill, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { formatCents } from "@/domain/money";
 import { monthKey, todayKey } from "@/domain/period";
+import { getPersonnelFile } from "@/application/hr/hr";
 import { AllocationForm } from "../../pool/pool-forms";
 import { WalletActions } from "../employee-forms";
+import { HrPanel } from "../hr-panel";
 
 export const metadata: Metadata = { title: "Mitarbeiterkonto" };
 
@@ -17,8 +19,8 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const today = todayKey();
   const from = `${monthKey()}-01`;
-  const [emp, pool, report] = await Promise.all([
-    getEmployee(user, id), poolOverview(user), getSummary(user, from, today, id),
+  const [emp, pool, report, hr] = await Promise.all([
+    getEmployee(user, id), poolOverview(user), getSummary(user, from, today, id), getPersonnelFile(user, id),
   ]);
   const m = report.summary.employees[0];
 
@@ -44,7 +46,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             </div>
             <p className="mt-1 text-xs text-muted">Kennzahlen für den laufenden Monat</p>
             <div className="mt-5 border-t border-line pt-4">
-              <WalletActions id={emp.id} balanceCents={emp.balanceCents} isActive={emp.isActive} />
+              <WalletActions id={emp.id} balanceCents={emp.balanceCents} isActive={emp.isActive} canEnterCashExpense={emp.canEnterCashExpense} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
             </div>
           </Section>
           <Section title="Kontobewegungen diesen Monat" flush>
@@ -53,10 +55,13 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
         </div>
         <Section title="Budget zuteilen">
           {emp.isActive
-            ? <AllocationForm employees={[]} poolCents={pool.poolBalanceCents} presetEmployeeId={emp.id} />
+            ? <AllocationForm employees={[]} poolCents={pool.poolBalanceCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} presetEmployeeId={emp.id} />
             : <p className="text-sm text-muted">Gesperrte Mitarbeiter erhalten kein Budget.</p>}
         </Section>
       </div>
+      <Section title="Digitale Personalakte" className="mt-6">
+        <HrPanel employeeId={emp.id} profile={hr.profile as Record<string, unknown> | null} documents={hr.documents} payslips={hr.payslips} />
+      </Section>
     </>
   );
 }

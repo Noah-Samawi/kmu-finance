@@ -89,7 +89,7 @@ export async function markInvoicePaid(ctx: Ctx, id: string, paidAtInput?: string
     if (!canMarkPaid(inv.status)) throw rule("Nur offene Rechnungen können als bezahlt markiert werden");
     await tx.update(invoices).set({ status: "PAID", paidAt }).where(eq(invoices.id, id));
     await insertEntry(tx, ctx, tenantId, {
-      type: "INCOME_INVOICE", ...deltasFor("INCOME_INVOICE", inv.grossCents),
+      type: "INCOME_INVOICE", ...deltasFor("INCOME_INVOICE", inv.grossCents, "BANK"),
       invoiceId: id, bookingDate: paidAt, description: `Zahlungseingang ${inv.number}`,
     });
     await audit(tx, ctx, "invoice.paid", "Invoice", id, { grossCents: inv.grossCents });

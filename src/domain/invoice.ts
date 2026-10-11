@@ -4,7 +4,12 @@ import { todayKey } from "./period";
 export type InvoiceStatus = "DRAFT" | "OPEN" | "PAID" | "CANCELED";
 export type DisplayStatus = InvoiceStatus | "OVERDUE";
 
-export const ALLOWED_VAT_RATES = [0, 700, 1900] as const;
+/** USt. 0 %–20 % in 1-%-Schritten (Basispunkte: 1900 = 19 %). */
+export const ALLOWED_VAT_RATES = Array.from({ length: 21 }, (_, i) => i * 100);
+
+export function isAllowedVatRate(bp: number): boolean {
+  return Number.isInteger(bp) && bp >= 0 && bp <= 2000 && bp % 100 === 0;
+}
 
 export interface LineInput {
   description: string;

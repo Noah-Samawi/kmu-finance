@@ -11,6 +11,7 @@ import { audit, loadEmployee, walletBalance, walletBalancesByEmployee } from "..
 
 const publicCols = {
   id: users.id, name: users.name, email: users.email, isActive: users.isActive,
+  canEnterCashExpense: users.canEnterCashExpense,
   lastLoginAt: users.lastLoginAt, createdAt: users.createdAt,
 };
 
@@ -32,7 +33,9 @@ export async function getEmployee(ctx: Ctx, employeeId: string) {
   return withTenant(ctx, async (tx) => {
     const e = await loadEmployee(tx, tenantId, employeeId, { requireActive: false });
     return {
-      id: e.id, name: e.name, email: e.email, isActive: e.isActive, lastLoginAt: e.lastLoginAt,
+      id: e.id, name: e.name, email: e.email, isActive: e.isActive,
+      canEnterCashExpense: e.canEnterCashExpense,
+      lastLoginAt: e.lastLoginAt,
       createdAt: e.createdAt, balanceCents: await walletBalance(tx, tenantId, e.id),
     };
   });
@@ -63,6 +66,7 @@ export async function updateEmployee(ctx: Ctx, employeeId: string, input: z.infe
     const patch: Partial<typeof users.$inferInsert> = {};
     if (input.name !== undefined) patch.name = input.name;
     if (input.isActive !== undefined) patch.isActive = input.isActive;
+    if (input.canEnterCashExpense !== undefined) patch.canEnterCashExpense = input.canEnterCashExpense;
     if (input.password) patch.passwordHash = await hashPassword(input.password);
     const [u] = await tx.update(users).set(patch).where(eq(users.id, employeeId)).returning(publicCols);
     await audit(tx, ctx, input.isActive === false ? "employee.locked" : input.isActive ? "employee.unlocked" : "employee.updated",

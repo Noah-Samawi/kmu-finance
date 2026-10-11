@@ -5,7 +5,8 @@ import { employeeOverview } from "@/application/dashboard";
 import { btn, cx, Section } from "@/components/ui";
 import { Bon } from "@/components/bon";
 import { LedgerList } from "@/components/ledger-list";
-import { fmtDateTime } from "@/domain/period";
+import { fmtDateTime, todayKey } from "@/domain/period";
+import { CashExpenseForm } from "./cash/cash-form";
 
 export const metadata: Metadata = { title: "Mein Konto" };
 
@@ -30,6 +31,11 @@ export default async function MePage() {
       <Link href="/me/receipts/new" className={cx(btn.base, btn.primary, "h-14 w-full text-base")}>
         Beleg fotografieren
       </Link>
+      {d.canEnterCashExpense && (
+        <Section title="Barausgabe (ohne Foto)">
+          <CashExpenseForm today={todayKey()} />
+        </Section>
+      )}
       {d.balanceCents === 0 && (
         <p className="text-center text-sm text-muted">Kein Guthaben. Belege kannst du einreichen, sobald dir Budget zugeteilt wurde.</p>
       )}

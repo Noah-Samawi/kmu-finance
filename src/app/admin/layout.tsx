@@ -9,8 +9,9 @@ const NAV = [
   { href: "/admin/dashboard", label: "Übersicht" },
   { href: "/admin/invoices", label: "Rechnungen" },
   { href: "/admin/contacts", label: "Kunden & Lieferanten" },
-  { href: "/admin/pool", label: "Kasse & Budgets" },
-  { href: "/admin/employees", label: "Mitarbeiter" },
+  { href: "/admin/pool", label: "Kasse & Bank" },
+  { href: "/admin/bank", label: "Kontoauszüge" },
+  { href: "/admin/employees", label: "Personal / HR" },
   { href: "/admin/receipts", label: "Belege prüfen", badgeKey: "receipts" },
   { href: "/admin/reports", label: "Berichte & Abschlüsse" },
 ] as const;

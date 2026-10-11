@@ -57,14 +57,32 @@ describe("invoice", () => {
 
 describe("ledger", () => {
   it("Vorzeichen je Buchungsart", () => {
-    expect(deltasFor("ALLOCATION", 500)).toEqual({ poolDeltaCents: -500, walletDeltaCents: 500 });
-    expect(deltasFor("RECEIPT", 500)).toEqual({ poolDeltaCents: 0, walletDeltaCents: -500 });
-    expect(deltasFor("RETURN", 500)).toEqual({ poolDeltaCents: 500, walletDeltaCents: -500 });
-    expect(reversalDeltas(deltasFor("ALLOCATION", 500))).toEqual({ poolDeltaCents: 500, walletDeltaCents: -500 });
+    expect(deltasFor("ALLOCATION", 500)).toMatchObject({ poolDeltaCents: -500, walletDeltaCents: 500, cashDeltaCents: -500, bankDeltaCents: 0 });
+    expect(deltasFor("ALLOCATION", 500, "BANK")).toMatchObject({ poolDeltaCents: -500, bankDeltaCents: -500, cashDeltaCents: 0, walletDeltaCents: 500 });
+    expect(deltasFor("RECEIPT", 500)).toMatchObject({ poolDeltaCents: 0, walletDeltaCents: -500 });
+    expect(deltasFor("RETURN", 500, "BANK")).toMatchObject({ poolDeltaCents: 500, bankDeltaCents: 500, walletDeltaCents: -500 });
+    expect(deltasFor("CASH_WITHDRAWAL", 200)).toMatchObject({ cashDeltaCents: 200, bankDeltaCents: -200, poolDeltaCents: 0 });
+    expect(reversalDeltas(deltasFor("ALLOCATION", 500))).toMatchObject({ poolDeltaCents: 500, walletDeltaCents: -500 });
   });
   it("nur positive Ganzzahlen", () => {
     expect(() => deltasFor("RECEIPT", 0)).toThrow();
     expect(() => deltasFor("RECEIPT", 1.5)).toThrow();
+  });
+});
+
+describe("payroll & bank match", () => {
+  it("berechnet Netto unter Brutto", async () => {
+    const { calculatePayslip } = await import("@/domain/payroll");
+    const r = calculatePayslip({ grossCents: 300000, taxClass: 1, childAllowances: 0, churchTax: "NONE", kvAdditionalBp: 250 });
+    expect(r.netCents).toBeGreaterThan(0);
+    expect(r.netCents).toBeLessThan(r.grossCents);
+  });
+  it("erkennt Geldautomaten und CSV", async () => {
+    const { isCashWithdrawal, parseBankCsv, matchBankLine } = await import("@/domain/reconcile");
+    expect(isCashWithdrawal("Auszahlung Geldautomat", "")).toBe(true);
+    const csv = "Buchungstag;Betrag;Beguenstigter;Verwendungszweck\n10.10.2026;-50,00;Sparkasse;Geldautomat City";
+    expect(parseBankCsv(csv)[0].amountCents).toBe(-5000);
+    expect(matchBankLine(parseBankCsv(csv)[0], [], []).status).toBe("CASH_WITHDRAWAL");
   });
 });
 

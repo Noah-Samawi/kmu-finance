@@ -30,6 +30,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <PageHeader title="Berichte & Abschlüsse" subtitle={`Zeitraum ${fmtDate(new Date(from + "T12:00:00Z"))} bis ${fmtDate(new Date(to + "T12:00:00Z"))}`}
         actions={<>
           <a href={`/api/v1/reports/export?format=pdf&${qs}`} className={cx(btn.base, btn.secondary)}>PDF für Steuerberater</a>
+          <a href={`/api/v1/reports/export?format=pdf&${qs}&split=1`} className={cx(btn.base, btn.primary)}>Monatsbericht Kasse/Bank PDF</a>
           <a href={`/api/v1/reports/export?format=csv&${qs}`} className={cx(btn.base, btn.secondary)}>CSV-Export</a>
         </>} />
 
@@ -45,6 +46,22 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <button className={cx(btn.base, btn.primary)}>Anzeigen</button>
       </form>
 
+      {!employeeId && (
+        <div className="mb-6 grid gap-3 sm:grid-cols-2">
+          <Section title="Kasse (Bar)">
+            <dl className="space-y-1.5 tabular">
+              <Line label="Anfang" cents={s.cash.openingCents} />
+              <Line label="Ende" cents={s.cash.closingCents} strong />
+            </dl>
+          </Section>
+          <Section title="Bankkonto">
+            <dl className="space-y-1.5 tabular">
+              <Line label="Anfang" cents={s.bank.openingCents} />
+              <Line label="Ende" cents={s.bank.closingCents} strong />
+            </dl>
+          </Section>
+        </div>
+      )}
       <div className="grid gap-6 lg:grid-cols-2">
         {!employeeId && <PoolSummary s={s} />}
         <Section title="Ausgaben im Zeitraum">

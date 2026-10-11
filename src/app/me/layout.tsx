@@ -21,6 +21,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
         <div className="mx-auto flex max-w-md">
           <NavLink href="/me" variant="bottom"><IconWallet />Konto</NavLink>
           <NavLink href="/me/receipts/new" variant="bottom"><IconCamera />Beleg</NavLink>
+          <NavLink href="/me/hr" variant="bottom"><IconList />Akte</NavLink>
           <NavLink href="/me/history" variant="bottom"><IconList />Verlauf</NavLink>
         </div>
       </nav>

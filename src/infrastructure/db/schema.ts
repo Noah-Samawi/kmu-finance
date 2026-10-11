@@ -32,10 +32,16 @@ export const ledgerTypeEnum = pgEnum("LedgerType", [
   "INCOME_MANUAL",  // Pool +            (manuelle Einnahme)
   "ALLOCATION",     // Pool -, Wallet +  (Budget an Mitarbeiter)
   "RECEIPT",        // Wallet -          (Beleg eingereicht)
-  "ADJUSTMENT",     // Wallet -          (Ausgabe ohne Beleg, durch Admin)
-  "RETURN",         // Wallet -, Pool +  (Restgeld zurück in den Pool)
+  "ADJUSTMENT",     // Wallet -          (Ausgabe ohne Beleg)
+  "RETURN",         // Wallet -, Pool +  (Restgeld zurück)
   "REVERSAL",       // negierte Deltas einer anderen Buchung
+  "CASH_WITHDRAWAL", // Bank -, Kasse +  (Geldautomat, kein Aufwand)
+  "ACCOUNT_ADJUST", // manuelle Korrektur Kasse oder Bank
 ]);
+export const accountKindEnum = pgEnum("AccountKind", ["CASH", "BANK"]);
+export const hrDocKindEnum = pgEnum("HrDocKind", ["ID", "CONTRACT", "TIMESHEET", "TAX", "PAYSLIP", "OTHER"]);
+export const reconcileStatusEnum = pgEnum("ReconcileStatus", ["GREEN", "RED", "CASH_WITHDRAWAL"]);
+export const churchTaxEnum = pgEnum("ChurchTax", ["NONE", "EIGHT", "NINE"]);
 export const receiptStatusEnum = pgEnum("ReceiptStatus", ["SUBMITTED", "APPROVED", "REJECTED"]);
 export const periodTypeEnum = pgEnum("PeriodType", ["DAY", "MONTH"]);
 
@@ -72,6 +78,7 @@ export const users = pgTable("User", {
   name: text("name").notNull(),
   role: roleEnum("role").notNull(),
   isActive: boolean("isActive").notNull().default(true),
+  canEnterCashExpense: boolean("canEnterCashExpense").notNull().default(false),
   lastLoginAt: timestamp("lastLoginAt", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -200,6 +207,9 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   tenantId: text("tenantId").notNull().references(() => tenants.id),
   type: ledgerTypeEnum("type").notNull(),
   poolDeltaCents: integer("poolDeltaCents").notNull().default(0),
+  cashDeltaCents: integer("cashDeltaCents").notNull().default(0),
+  bankDeltaCents: integer("bankDeltaCents").notNull().default(0),
+  accountKind: accountKindEnum("accountKind"),
   walletDeltaCents: integer("walletDeltaCents").notNull().default(0),
   bookingDate: timestamp("bookingDate", { withTimezone: true }).notNull().defaultNow(),
   description: text("description"),
@@ -231,6 +241,99 @@ export const auditLogs = pgTable("AuditLog", {
   index("Audit_entity_idx").on(t.entity, t.entityId),
 ]);
 
+export const employeeProfiles = pgTable("EmployeeProfile", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  userId: text("userId").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  dateOfBirth: timestamp("dateOfBirth", { withTimezone: true }),
+  nationality: text("nationality"),
+  street: text("street"),
+  zip: text("zip"),
+  city: text("city"),
+  taxId: text("taxId"),
+  socialSecurityNumber: text("socialSecurityNumber"),
+  taxClass: integer("taxClass").notNull().default(1),
+  childAllowances: integer("childAllowances").notNull().default(0),
+  churchTax: churchTaxEnum("churchTax").notNull().default("NONE"),
+  healthInsuranceName: text("healthInsuranceName"),
+  kvAdditionalBp: integer("kvAdditionalBp").notNull().default(250),
+  iban: text("iban"),
+  bic: text("bic"),
+  jobTitle: text("jobTitle"),
+  startDate: timestamp("startDate", { withTimezone: true }),
+  weeklyHours: numeric("weeklyHours", { precision: 5, scale: 2 }),
+  monthlyGrossCents: integer("monthlyGrossCents").notNull().default(0),
+  notes: text("notes"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [index("EmployeeProfile_tenant_idx").on(t.tenantId)]);
+
+export const hrDocuments = pgTable("HrDocument", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  employeeId: text("employeeId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: hrDocKindEnum("kind").notNull().default("OTHER"),
+  title: text("title").notNull(),
+  fileKey: text("fileKey").notNull(),
+  fileMime: text("fileMime").notNull(),
+  notes: text("notes"),
+  createdById: text("createdById").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [index("HrDocument_tenant_emp_idx").on(t.tenantId, t.employeeId)]);
+
+export const payslips = pgTable("Payslip", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  employeeId: text("employeeId").notNull().references(() => users.id),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(),
+  grossCents: integer("grossCents").notNull(),
+  taxClass: integer("taxClass").notNull(),
+  childAllowances: integer("childAllowances").notNull().default(0),
+  churchTax: churchTaxEnum("churchTax").notNull().default("NONE"),
+  rvCents: integer("rvCents").notNull().default(0),
+  avCents: integer("avCents").notNull().default(0),
+  kvCents: integer("kvCents").notNull().default(0),
+  pvCents: integer("pvCents").notNull().default(0),
+  wageTaxCents: integer("wageTaxCents").notNull().default(0),
+  soliCents: integer("soliCents").notNull().default(0),
+  churchTaxCents: integer("churchTaxCents").notNull().default(0),
+  netCents: integer("netCents").notNull(),
+  pdfKey: text("pdfKey"),
+  createdById: text("createdById").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex("Payslip_emp_period_key").on(t.tenantId, t.employeeId, t.year, t.month),
+]);
+
+export const bankStatements = pgTable("BankStatement", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  periodMonth: text("periodMonth").notNull(),
+  fileName: text("fileName").notNull(),
+  fileMime: text("fileMime").notNull(),
+  fileKey: text("fileKey").notNull(),
+  createdById: text("createdById").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [index("BankStatement_tenant_month_idx").on(t.tenantId, t.periodMonth)]);
+
+export const bankTransactions = pgTable("BankTransaction", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  statementId: text("statementId").notNull().references(() => bankStatements.id, { onDelete: "cascade" }),
+  bookingDate: timestamp("bookingDate", { withTimezone: true }).notNull(),
+  amountCents: integer("amountCents").notNull(),
+  payee: text("payee"),
+  purpose: text("purpose"),
+  iban: text("iban"),
+  status: reconcileStatusEnum("status").notNull().default("RED"),
+  matchedInvoiceId: text("matchedInvoiceId").references(() => invoices.id),
+  matchedReceiptId: text("matchedReceiptId").references(() => receipts.id),
+  postedLedgerId: text("postedLedgerId").references(() => ledgerEntries.id),
+  createdAt: createdAt(),
+}, (t) => [index("BankTx_tenant_date_idx").on(t.tenantId, t.bookingDate)]);
+
 export type Role = (typeof roleEnum.enumValues)[number];
 export type LedgerType = (typeof ledgerTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
+export type AccountKind = (typeof accountKindEnum.enumValues)[number];

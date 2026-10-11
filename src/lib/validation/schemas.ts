@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { parseEuroToCents } from "@/domain/money";
-import { ALLOWED_VAT_RATES } from "@/domain/invoice";
+import { isAllowedVatRate } from "@/domain/invoice";
 
 // Gemeinsame Zod-Schemas für Client und Server.
 
@@ -65,6 +65,13 @@ export const employeeUpdateSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   isActive: z.boolean().optional(),
   password: passwordSchema.optional(),
+  canEnterCashExpense: z.boolean().optional(),
+});
+
+export const cashExpenseSchema = z.object({
+  amountCents: positiveAmount,
+  description: z.string().trim().min(3, "Begründung (Wofür?) erforderlich").max(300),
+  bookingDate: dateStr.optional(),
 });
 
 export const contactSchema = z.object({
@@ -85,7 +92,7 @@ export const invoiceItemSchema = z.object({
     .refine((v) => /^\d+(\.\d{1,3})?$/.test(v) && Number(v) > 0, "Menge > 0, max. 3 Nachkommastellen"),
   unit: z.string().trim().min(1).max(20).default("Stk"),
   unitPriceCents: positiveAmount,
-  vatRate: z.number().int().refine((v) => (ALLOWED_VAT_RATES as readonly number[]).includes(v), "USt.-Satz: 0, 7 oder 19 %"),
+  vatRate: z.number().int().refine(isAllowedVatRate, "USt.-Satz: 0 % bis 20 %"),
 });
 
 export const invoiceDraftSchema = z.object({
@@ -100,28 +107,55 @@ export const invoiceDraftUpdateSchema = invoiceDraftSchema.partial();
 export const markPaidSchema = z.object({ paidAt: dateStr.optional() });
 export const cancelInvoiceSchema = z.object({ reason: z.string().trim().min(3).max(500) });
 
+const accountKind = z.enum(["CASH", "BANK"]).default("CASH");
+
 export const incomeSchema = z.object({
   amountCents: positiveAmount,
   description: z.string().trim().min(2).max(300),
   bookingDate: dateStr.optional(),
+  accountKind,
 });
 
 export const allocationSchema = z.object({
   employeeId: z.string().min(1),
   amountCents: positiveAmount,
   description: z.string().trim().max(300).optional().nullable(),
+  accountKind,
+});
+
+export const accountAdjustSchema = z.object({
+  accountKind,
+  amountCents: z.union([z.number().int(), z.string()]).transform((v, ctx) => {
+    try {
+      const n = typeof v === "number" ? v : parseEuroToCents(v);
+      if (n === 0) {
+        ctx.addIssue({ code: "custom", message: "Betrag darf nicht 0 sein" });
+        return z.NEVER;
+      }
+      return n;
+    } catch (e) {
+      ctx.addIssue({ code: "custom", message: (e as Error).message });
+      return z.NEVER;
+    }
+  }),
+  description: z.string().trim().min(3, "Begründung (Wofür?) erforderlich").max(300),
 });
 
 export const adjustSchema = z.object({
   toZero: z.boolean().default(false),
   amountCents: positiveAmount.optional(),
-  description: z.string().trim().min(3, "Begründung erforderlich").max(300),
+  description: z.string().trim().min(3, "Begründung (Wofür?) erforderlich").max(300),
 }).refine((v) => v.toZero || v.amountCents !== undefined, "Betrag oder 'auf 0 setzen' angeben");
+
+export const resetBudgetSchema = z.object({
+  description: z.string().trim().min(3, "Begründung (Wofür?) erforderlich").max(300),
+});
 
 export const returnSchema = z.object({
   all: z.boolean().default(false),
   amountCents: positiveAmount.optional(),
-  description: z.string().trim().max(300).optional().nullable(),
+  description: z.string().trim().min(3, "Begründung (Wofür?) erforderlich").max(300),
+  accountKind,
 }).refine((v) => v.all || v.amountCents !== undefined, "Betrag oder 'alles' angeben");
 
 export const reverseSchema = z.object({ reason: z.string().trim().min(3).max(300) });
@@ -131,7 +165,9 @@ export const receiptFieldsSchema = z.object({
   merchant: z.string().trim().min(1).max(200),
   description: optStr(500),
   receiptDate: dateStr,
-  vatRate: z.coerce.number().int().optional().nullable(),
+  vatRate: z.coerce.number().int().optional().nullable()
+    .transform((v) => (v == null || Number.isNaN(v) ? null : v <= 20 ? v * 100 : v))
+    .refine((v) => v == null || isAllowedVatRate(v), "USt.-Satz: 0 % bis 20 %"),
 });
 
 export const reviewSchema = z.discriminatedUnion("action", [
@@ -148,4 +184,32 @@ export const rangeSchema = z.object({
 export const closingSchema = z.object({
   periodType: z.enum(["DAY", "MONTH"]),
   period: z.string(), // "2026-10-06" oder "2026-10"
+});
+
+export const hrProfileSchema = z.object({
+  dateOfBirth: dateStr.optional().nullable(),
+  nationality: optStr(80),
+  street: optStr(),
+  zip: optStr(10),
+  city: optStr(100),
+  taxId: optStr(20),
+  socialSecurityNumber: optStr(20),
+  taxClass: z.coerce.number().int().min(1).max(6).default(1),
+  childAllowances: z.coerce.number().int().min(0).max(10).default(0),
+  churchTax: z.enum(["NONE", "EIGHT", "NINE"]).default("NONE"),
+  healthInsuranceName: optStr(120),
+  kvAdditionalBp: z.coerce.number().int().min(0).max(3000).default(250),
+  iban: optStr(34),
+  bic: optStr(11),
+  jobTitle: optStr(120),
+  startDate: dateStr.optional().nullable(),
+  weeklyHours: z.string().trim().max(8).optional().nullable(),
+  monthlyGrossCents: z.preprocess((v) => (v === "" || v == null ? undefined : v), amountCents.optional()),
+  notes: optStr(4000),
+});
+
+export const payslipCreateSchema = z.object({
+  year: z.coerce.number().int().min(2020).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+  grossCents: positiveAmount.optional(),
 });

@@ -7,7 +7,7 @@ import { PageHeader, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { formatCents } from "@/domain/money";
 import { monthKey, todayKey } from "@/domain/period";
-import { AllocationForm, IncomeForm } from "./pool-forms";
+import { AccountAdjustForm, AllocationForm, IncomeForm } from "./pool-forms";
 
 export const metadata: Metadata = { title: "Kasse & Budgets" };
 
@@ -22,7 +22,7 @@ export default async function PoolPage() {
 
   return (
     <>
-      <PageHeader title="Kasse & Budgets" subtitle="Einnahmen sammeln und als Budget an Mitarbeiter verteilen" />
+      <PageHeader title="Kasse & Bank" subtitle="Getrennte Bestände. Rückgaben werden dem Herkunftskonto gutgeschrieben." />
 
       {/* Die Rechnung des Monats, Zeile für Zeile wie im Kassenbuch */}
       <section className="mb-6 rounded-xl border border-line bg-surface p-5 md:p-6">
@@ -32,8 +32,10 @@ export default async function PoolPage() {
           <Row label="Weitere Einnahmen" cents={p.incomeManualCents} sign="+" />
           <Row label="An Mitarbeiter verteilt" cents={p.allocatedCents} sign="−" />
           <Row label="Von Mitarbeitern zurück" cents={p.returnedCents} sign="+" />
+          <Row label="Kasse (Bar)" cents={pool.cashBalanceCents} />
+          <Row label="Bankkonto" cents={pool.bankBalanceCents} />
           <div className="flex items-baseline justify-between border-t-2 border-ink pt-2">
-            <dt className="font-semibold">Freier Kassenbestand</dt>
+            <dt className="font-semibold">Summe frei</dt>
             <dd className="text-3xl font-semibold tracking-tight">{formatCents(pool.poolBalanceCents)}</dd>
           </div>
         </dl>
@@ -45,12 +47,15 @@ export default async function PoolPage() {
         </Section>
         <div className="space-y-6">
           <Section title="Budget an Mitarbeiter">
-            {active.length ? <AllocationForm employees={active} poolCents={pool.poolBalanceCents} /> :
+            {active.length ? <AllocationForm employees={active} poolCents={pool.poolBalanceCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} /> :
               <p className="text-sm text-muted">Lege zuerst Mitarbeiter an.</p>}
           </Section>
           <Section title="Einnahme erfassen">
             <IncomeForm today={today} />
-            <p className="mt-3 text-xs text-muted">Bezahlte Rechnungen werden automatisch gebucht.</p>
+            <p className="mt-3 text-xs text-muted">Bezahlte Rechnungen gehen auf das Bankkonto.</p>
+          </Section>
+          <Section title="Bestand korrigieren">
+            <AccountAdjustForm />
           </Section>
         </div>
       </div>

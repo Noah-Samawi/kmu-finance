@@ -26,8 +26,9 @@ export default async function DashboardPage() {
 
       {/* Kassengleichung: das Herzstück der Übersicht */}
       <section className="mb-6 rounded-xl border border-line bg-surface p-5 md:p-6">
-        <p className="text-sm font-medium text-muted">Freier Kassenbestand</p>
+        <p className="text-sm font-medium text-muted">Freie Mittel (Kasse + Bank)</p>
         <p className="mt-1 text-4xl font-semibold tracking-tight tabular md:text-5xl">{formatCents(d.poolBalanceCents)}</p>
+        <p className="mt-1 text-sm text-muted">Kasse {formatCents(d.cashBalanceCents)} · Bank {formatCents(d.bankBalanceCents)}</p>
         <p className="mt-2 max-w-2xl text-muted">
           Im {monthName}: <Money cents={d.month.incomeCents} signed /> eingenommen,{" "}
           <Money cents={-d.month.allocatedCents} signed /> als Budget verteilt.
