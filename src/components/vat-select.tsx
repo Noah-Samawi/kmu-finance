@@ -1,4 +1,4 @@
-import { ALLOWED_VAT_RATES, COMMON_VAT_RATES } from "@/domain/invoice";
+import { ALLOWED_VAT_RATES, COMMON_VAT_RATES, DEFAULT_VAT_RATE } from "@/domain/invoice";
 import { inputCls } from "./ui";
 
 export function VatSelect({
@@ -14,7 +14,7 @@ export function VatSelect({
 }) {
   const extra = value !== undefined
     ? { value: value === "" ? "" : String(value) }
-    : { defaultValue: defaultValue === undefined ? (allowEmpty ? "" : "700") : defaultValue === "" ? "" : String(defaultValue) };
+    : { defaultValue: defaultValue === undefined ? (allowEmpty ? "" : String(DEFAULT_VAT_RATE)) : defaultValue === "" ? "" : String(defaultValue) };
   return (
     <select
       name={name}
@@ -29,8 +29,8 @@ export function VatSelect({
           <option key={`c-${bp}`} value={String(bp)}>{bp / 100} %</option>
         ))}
       </optgroup>
-      <optgroup label="0 % bis 20 %">
-        {ALLOWED_VAT_RATES.map((bp) => (
+      <optgroup label="Weitere Sätze bis 20 %">
+        {ALLOWED_VAT_RATES.filter((bp) => !(COMMON_VAT_RATES as readonly number[]).includes(bp)).map((bp) => (
           <option key={bp} value={String(bp)}>{bp / 100} %</option>
         ))}
       </optgroup>

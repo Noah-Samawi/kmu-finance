@@ -67,7 +67,7 @@ function Row({ label, cents, sign }: { label: string; cents: number; sign?: "+" 
   return (
     <div className="flex items-baseline justify-between gap-4 text-[15px]">
       <dt className="text-muted">{label}</dt>
-      <dd>{sign && <span className="mr-1 text-muted">{sign}</span>}{formatCents(cents)}</dd>
+      <dd>{sign && <span className="me-1 text-muted">{sign}</span>}{formatCents(cents)}</dd>
     </div>
   );
 }

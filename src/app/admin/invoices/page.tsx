@@ -30,7 +30,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             {f.label}
           </Link>
         ))}
-        <form className="ml-auto w-full sm:w-64">
+        <form className="ms-auto w-full sm:w-64">
           {status && <input type="hidden" name="status" value={status} />}
           <input name="q" defaultValue={sp.q} placeholder="Nummer oder Kunde suchen"
             className="h-10 w-full rounded-full border border-line bg-surface px-4 text-sm focus:border-ledger focus:outline-none" />

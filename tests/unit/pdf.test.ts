@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
@@ -49,6 +49,22 @@ describe("PDF-Export", () => {
     const pdf = await invoice();
     preview("rechnung.pdf", pdf);
     expect(Buffer.from(pdf.subarray(0, 4)).toString()).toBe("%PDF");
+    expect((await PDFDocument.load(pdf)).getPageCount()).toBe(1);
+  });
+
+  it("Rechnung mit Logo oben rechts und getrennten Zeilen für 19 % und 20 %", async () => {
+    const logo = `data:image/png;base64,${readFileSync(path.join(__dirname, "../fixtures/logo.png")).toString("base64")}`;
+    const lines = [
+      { description: "Speisen", quantity: "10", unit: "Stk", unitPriceCents: 1500, vatRate: 1900 },
+      { description: "Service-Pauschale", quantity: "1", unit: "Psch.", unitPriceCents: 25000, vatRate: 2000 },
+    ];
+    const calc = calcInvoice(lines, false);
+    expect([calc.netCents, calc.vatCents, calc.grossCents]).toEqual([40000, 2850 + 5000, 47850]);
+    const pdf = await invoice({
+      issuer: { ...issuer, logoKey: logo },
+      items: calc.items, netCents: calc.netCents, vatCents: calc.vatCents, grossCents: calc.grossCents,
+    });
+    preview("rechnung-logo.pdf", pdf);
     expect((await PDFDocument.load(pdf)).getPageCount()).toBe(1);
   });
 

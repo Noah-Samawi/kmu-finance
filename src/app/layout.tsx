@@ -5,6 +5,9 @@ import "@fontsource/ibm-plex-mono/600.css";
 import "@fontsource/ibm-plex-sans-arabic/arabic-400.css";
 import "@fontsource/ibm-plex-sans-arabic/arabic-600.css";
 import "./globals.css";
+import { I18nProvider } from "@/components/i18n";
+import { dirOf } from "@/lib/i18n";
+import { getLang } from "@/lib/i18n-server";
 
 export const metadata: Metadata = {
   title: { default: "Kassenbuch", template: "%s · Kassenbuch" },
@@ -20,10 +23,13 @@ export const viewport: Viewport = {
   themeColor: "#1e6b50",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const lang = await getLang();
   return (
-    <html lang="de" dir="ltr">
-      <body className="min-h-dvh antialiased">{children}</body>
+    <html lang={lang} dir={dirOf(lang)}>
+      <body className="min-h-dvh antialiased">
+        <I18nProvider lang={lang}>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

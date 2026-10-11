@@ -10,7 +10,7 @@ export function LetterheadForm({ tenant }: { tenant: {
   invoicePrefix: string; defaultPaymentDays: number; invoiceFooter: string | null;
   defaultPaymentMethod: "TRANSFER" | "CASH"; logoKey: string | null;
   bankName?: string | null; invoiceEmail?: string | null; website?: string | null;
-  invoiceTagline?: string | null; ownerName?: string | null;
+  invoiceTagline?: string | null; ownerName?: string | null; smallBusiness?: boolean;
 } }) {
   const { call, busy, error } = useApi();
   const [logo, setLogo] = useState(tenant.logoKey ?? "");
@@ -26,6 +26,7 @@ export function LetterheadForm({ tenant }: { tenant: {
         invoiceFooter: f.invoiceFooter || null, defaultPaymentMethod: f.defaultPaymentMethod,
         bankName: f.bankName || null, invoiceEmail: f.invoiceEmail || null, website: f.website || null,
         invoiceTagline: f.invoiceTagline || null, ownerName: f.ownerName || null,
+        smallBusiness: f.smallBusiness === "on",
         logoDataUrl: logo || null,
       });
     }}>
@@ -44,6 +45,13 @@ export function LetterheadForm({ tenant }: { tenant: {
       <Field label="BIC"><input name="bic" defaultValue={tenant.bic ?? ""} className={inputCls} /></Field>
       <Field label="E-Mail (Rechnung)"><input name="invoiceEmail" type="email" defaultValue={tenant.invoiceEmail ?? ""} className={inputCls} /></Field>
       <Field label="Web"><input name="website" defaultValue={tenant.website ?? ""} className={inputCls} placeholder="https://…" /></Field>
+      <label className="flex items-start gap-3 rounded-lg border border-line p-3 text-sm sm:col-span-2">
+        <input type="checkbox" name="smallBusiness" defaultChecked={!!tenant.smallBusiness} className="mt-0.5 h-4 w-4 accent-[var(--color-ledger)]" />
+        <span>
+          <span className="font-semibold">Kleinunternehmer (§ 19 UStG)</span>
+          <span className="block text-muted">Nur aktivieren, wenn keine Umsatzsteuer ausgewiesen werden darf – dann sind alle Rechnungspositionen 0 %. Deaktiviert: frei wählbar 0 % bis 20 %.</span>
+        </span>
+      </label>
       <Field label="Rechnungspräfix"><input name="invoicePrefix" defaultValue={tenant.invoicePrefix} className={inputCls} /></Field>
       <Field label="Zahlungsziel (Tage)"><input name="defaultPaymentDays" type="number" defaultValue={tenant.defaultPaymentDays} className={inputCls} /></Field>
       <Field label="Standard-Zahlungsart">

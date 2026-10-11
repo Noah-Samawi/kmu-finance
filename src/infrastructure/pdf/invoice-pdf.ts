@@ -44,27 +44,40 @@ export async function renderInvoicePdf(d: InvoicePdfData): Promise<Uint8Array> {
   const contentW = right - left;
   const iss = d.issuer;
 
-  // ── Briefkopf: Logo + Firmenname rechtsbündig (Serif, Versalien) ──
-  w.y = A4.h - 46;
+  // ── Briefkopf: Absender oben links, Logo oben rechts ──
+  const top = A4.h - 50;
+  const logoW = 150;
+  let logoBottom = top;
   if (iss.logoKey?.startsWith("data:image")) {
     try {
       const img = await w.embedImage(iss.logoKey);
-      const scale = Math.min(38 / img.height, 120 / img.width);
+      const scale = Math.min(56 / img.height, logoW / img.width);
       const h = img.height * scale;
-      w.page.drawImage(img, { x: right - img.width * scale, y: w.y - h + 8, width: img.width * scale, height: h });
-      w.y -= h + 10;
+      w.page.drawImage(img, { x: right - img.width * scale, y: top - h, width: img.width * scale, height: h });
+      logoBottom = top - h;
     } catch { /* Logo optional */ }
   }
-  w.y -= 14;
-  for (const l of w.wrap(iss.legalName.toLocaleUpperCase("de-DE"), 330, 24, { face: "serif", bold: true })) {
-    w.text(l, { x: left, width: contentW, align: "right", size: 24, face: "serif", bold: true, color: INK });
-    w.y -= 26;
+  const senderW = contentW - logoW - 20;
+  w.y = top - 18;
+  for (const l of w.wrap(iss.legalName.toLocaleUpperCase("de-DE"), senderW, 20, { face: "serif", bold: true })) {
+    w.text(l, { x: left, size: 20, face: "serif", bold: true, color: INK });
+    w.y -= 22;
   }
-  const headBottom = w.y + 12;
-  if (iss.tagline) w.text(iss.tagline.toLocaleUpperCase("de-DE"), { x: left, width: contentW, align: "right", size: 7, color: GRAY });
-  // Absenderzeile (DIN 5008) links auf Höhe des Slogans
-  w.text(w.fit([iss.legalName, iss.street, `${iss.zip} ${iss.city}`].join(" · "), 280, 7), { x: left, size: 7, color: GRAY });
-  w.y = Math.min(w.y, headBottom) - 10;
+  if (iss.tagline) {
+    w.text(w.fit(iss.tagline.toLocaleUpperCase("de-DE"), senderW, 7), { x: left, size: 7, color: GRAY });
+    w.y -= 13;
+  }
+  const senderLines = [
+    iss.ownerName ? `Inhaber: ${iss.ownerName}` : null,
+    iss.street,
+    `${iss.zip} ${iss.city}`,
+    [iss.invoiceEmail, iss.website].filter(Boolean).join(" · ") || null,
+  ].filter((x): x is string => !!x);
+  for (const l of senderLines) {
+    w.text(w.fit(l, senderW, 8.5), { x: left, size: 8.5, color: INK });
+    w.y -= 11.5;
+  }
+  w.y = Math.min(w.y + 4, logoBottom - 6);
   w.hLine(left, right, w.y, 1.3, [0.12, 0.12, 0.13]);
   w.y -= 18;
 
@@ -138,7 +151,7 @@ export async function renderInvoicePdf(d: InvoicePdfData): Promise<Uint8Array> {
 
   // ── Summenblock: Summe Netto · MwSt. X % · Rechnungsbetrag brutto ──
   const sx = left + contentW * 0.465;
-  const sumRows: [string, string][] = [["Summe Netto", formatCents(d.netCents)]];
+  const sumRows: [string, string][] = [["Summe netto", formatCents(d.netCents)]];
   if (d.issuer.smallBusiness) sumRows.push(["MwSt. 0 % (§ 19 UStG)", formatCents(0)]);
   else {
     const br = vatBreakdown(d.items);

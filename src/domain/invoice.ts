@@ -22,6 +22,7 @@ export function parseVatRate(v: unknown): number {
 }
 
 export const COMMON_VAT_RATES = [0, 700, 1900, 2000] as const;
+export const DEFAULT_VAT_RATE = 1900;
 
 export interface LineInput {
   description: string;
@@ -55,13 +56,21 @@ export function calcLine(line: LineInput, position: number): LineResult {
 }
 
 /**
- * Summen je Position berechnen und aufaddieren.
+ * USt. wird je Steuersatz auf die Netto-Summe gerechnet (Netto × Satz = MwSt.)
+ * und der Rundungscent auf die letzte Position des Satzes gelegt, damit die
+ * Positionswerte exakt zur ausgewiesenen Steuer aufaddieren.
  * smallBusiness (§ 19 UStG): alle Steuersätze werden 0.
  */
 export function calcInvoice(lines: LineInput[], smallBusiness: boolean) {
   const items = lines.map((l, i) =>
     calcLine({ ...l, vatRate: smallBusiness ? 0 : l.vatRate }, i + 1),
   );
+  for (const rate of new Set(items.map((i) => i.vatRate))) {
+    const group = items.filter((i) => i.vatRate === rate);
+    const net = group.reduce((s, i) => s + i.lineNetCents, 0);
+    const diff = roundHalfAway((net * rate) / 10000) - group.reduce((s, i) => s + i.lineVatCents, 0);
+    group[group.length - 1].lineVatCents += diff;
+  }
   const netCents = items.reduce((s, i) => s + i.lineNetCents, 0);
   const vatCents = items.reduce((s, i) => s + i.lineVatCents, 0);
   return { items, netCents, vatCents, grossCents: netCents + vatCents };

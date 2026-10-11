@@ -103,8 +103,8 @@ export function Table({ head, children }: { head: React.ReactNode[]; children: R
     <div className="overflow-x-auto">
       <table className="w-full min-w-[560px] text-sm">
         <thead>
-          <tr className="border-b border-line text-left text-muted">
-            {head.map((h, i) => <th key={i} className="px-4 py-2.5 font-medium first:pl-4 md:first:pl-5">{h}</th>)}
+          <tr className="border-b border-line text-start text-muted">
+            {head.map((h, i) => <th key={i} className="px-4 py-2.5 font-medium first:ps-4 md:first:ps-5">{h}</th>)}
           </tr>
         </thead>
         <tbody className="divide-y divide-line">{children}</tbody>
@@ -113,4 +113,4 @@ export function Table({ head, children }: { head: React.ReactNode[]; children: R
   );
 }
 
-export const td = "px-4 py-3 first:pl-4 md:first:pl-5 align-top";
+export const td = "px-4 py-3 first:ps-4 md:first:ps-5 align-top";

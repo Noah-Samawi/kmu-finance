@@ -74,7 +74,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
               </tr>
             ))}
           </Table>
-          <dl className="ml-auto max-w-xs space-y-1 border-t border-line px-4 py-4 text-sm md:px-5">
+          <dl className="ms-auto max-w-xs space-y-1 border-t border-line px-4 py-4 text-sm md:px-5">
             <div className="flex justify-between"><dt className="text-muted">Netto</dt><dd><Money cents={inv.netCents} /></dd></div>
             {vatBreakdown(inv.items).filter((v) => v.rate > 0).map((v) => (
               <div key={v.rate} className="flex justify-between"><dt className="text-muted">USt. {formatVatRate(v.rate)}</dt><dd><Money cents={v.vat} /></dd></div>

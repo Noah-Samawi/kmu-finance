@@ -48,25 +48,25 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds }: {
           <div className="flex shrink-0 flex-col items-end gap-1 text-right">
             {(mode === "pool" || mode === "both") && r.poolDeltaCents !== 0 && (
               <span className="text-sm">
-                {mode === "both" && <span className="mr-1 text-xs text-muted">Kasse</span>}
+                {mode === "both" && <span className="me-1 text-xs text-muted">Kasse</span>}
                 <Money cents={r.poolDeltaCents} signed className="font-semibold" />
               </span>
             )}
             {(mode === "wallet" || mode === "both") && r.walletDeltaCents !== 0 && (
               <span className="text-sm">
-                {mode === "both" && <span className="mr-1 text-xs text-muted">Budget</span>}
+                {mode === "both" && <span className="me-1 text-xs text-muted">Budget</span>}
                 <Money cents={r.walletDeltaCents} signed className="font-semibold" />
               </span>
             )}
             {r.claimDeltaCents !== 0 && (
               <span className="text-sm">
-                <span className="mr-1 text-xs text-muted">Auslage</span>
+                <span className="me-1 text-xs text-muted">Auslage</span>
                 <Money cents={r.claimDeltaCents} signed className="font-semibold" />
               </span>
             )}
             {r.partnerDeltaCents !== 0 && (
               <span className="text-sm">
-                <span className="mr-1 text-xs text-muted">Kapital</span>
+                <span className="me-1 text-xs text-muted">Kapital</span>
                 <Money cents={r.partnerDeltaCents} signed className="font-semibold" />
               </span>
             )}

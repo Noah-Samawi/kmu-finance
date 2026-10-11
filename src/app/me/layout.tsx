@@ -1,12 +1,15 @@
 import { requireUser } from "@/lib/auth";
 import { NavLink } from "@/components/nav-link";
 import { LogoutButton } from "@/components/logout-button";
+import { LanguageSwitcher } from "@/components/i18n";
+import { getT } from "@/lib/i18n-server";
 
 export const dynamic = "force-dynamic";
 
 // Mitarbeiter-App: für das Handy gebaut, Navigation unten in Daumenreichweite
 export default async function EmployeeLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("EMPLOYEE");
+  const t = await getT();
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col">
       <header className="flex items-center justify-between px-4 pb-2 pt-4">
@@ -14,15 +17,18 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
           <p className="truncate text-sm text-muted">{user.tenantName}</p>
           <p className="truncate font-semibold">{user.name}</p>
         </div>
-        <LogoutButton />
+        <div className="flex shrink-0 items-center gap-3">
+          <LanguageSwitcher />
+          <LogoutButton />
+        </div>
       </header>
       <main className="flex-1 px-4 pb-28">{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
         <div className="mx-auto flex max-w-md">
-          <NavLink href="/me" variant="bottom"><IconWallet />Konto</NavLink>
-          <NavLink href="/me/receipts/new" variant="bottom"><IconCamera />Beleg</NavLink>
-          <NavLink href="/me/hr" variant="bottom"><IconList />Akte</NavLink>
-          <NavLink href="/me/history" variant="bottom"><IconList />Verlauf</NavLink>
+          <NavLink href="/me" variant="bottom"><IconWallet />{t("nav.me.account")}</NavLink>
+          <NavLink href="/me/receipts/new" variant="bottom"><IconCamera />{t("nav.me.receipt")}</NavLink>
+          <NavLink href="/me/hr" variant="bottom"><IconList />{t("nav.me.hr")}</NavLink>
+          <NavLink href="/me/history" variant="bottom"><IconList />{t("nav.me.history")}</NavLink>
         </div>
       </nav>
     </div>

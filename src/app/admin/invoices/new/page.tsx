@@ -5,15 +5,16 @@ import { listContacts } from "@/application/contacts/contacts";
 import { getOwnTenant } from "@/application/tenants/tenants";
 import { PageHeader, Section, Empty } from "@/components/ui";
 import { InvoiceEditor } from "../invoice-editor";
+import { getT } from "@/lib/i18n-server";
 
 export const metadata: Metadata = { title: "Neue Rechnung" };
 
 export default async function NewInvoicePage({ searchParams }: { searchParams: Promise<{ contactId?: string }> }) {
   const user = await requireUser("ADMIN");
-  const [contacts, tenant, sp] = await Promise.all([listContacts(user), getOwnTenant(user), searchParams]);
+  const [contacts, tenant, sp, t] = await Promise.all([listContacts(user), getOwnTenant(user), searchParams, getT()]);
   return (
     <>
-      <PageHeader title="Neue Rechnung" subtitle="Die Rechnungsnummer wird beim Ausstellen vergeben." />
+      <PageHeader title={t("inv.new")} subtitle={t("inv.newSubtitle")} />
       {contacts.length === 0 ? (
         <Section>
           <Empty title="Zuerst einen Kunden anlegen">
