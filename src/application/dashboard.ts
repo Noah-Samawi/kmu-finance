@@ -4,7 +4,7 @@ import { withTenant } from "@/infrastructure/db/tenant-tx";
 import { receipts } from "@/infrastructure/db/schema";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "./context";
-import { bankBalance, cashBalance, poolBalance, walletBalance } from "./ledger-service";
+import { bankBalance, cashBalance, claimBalance, poolBalance, walletBalance } from "./ledger-service";
 import { invoiceStats } from "./invoices/drafts";
 import { buildSummary, ledgerRows } from "./reports/reports";
 
@@ -28,6 +28,7 @@ export async function adminDashboard(ctx: Ctx) {
         adjustmentsCents: month.totals.adjustmentsCents,
       },
       walletsOpenCents: month.totals.walletsOpenCents,
+      claimsOpenCents: month.totals.claimsOpenCents,
       employees: month.employees,
       invoices: await invoiceStats(tx, tenantId),
       pendingReceipts: pending.n,
@@ -47,7 +48,9 @@ export async function employeeOverview(ctx: Ctx) {
     const month = await buildSummary(tx, tenantId, monthRange(mk), `${mk}-01`, tk, ctx.userId);
     return {
       balanceCents: await walletBalance(tx, tenantId, ctx.userId),
+      claimCents: await claimBalance(tx, tenantId, ctx.userId),
       canEnterCashExpense: ctx.canEnterCashExpense,
+      canEnterOutlay: ctx.canEnterOutlay,
       today: today.employees[0],
       month: month.employees[0],
       recent: await ledgerRows(tx, tenantId, { employeeId: ctx.userId, limit: 15 }),

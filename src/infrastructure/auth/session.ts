@@ -15,6 +15,9 @@ export interface AuthUser {
   email: string;
   tenantName: string | null;
   canEnterCashExpense: boolean;
+  canEnterOutlay: boolean;
+  canViewReports: boolean;
+  canViewBank: boolean;
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -43,6 +46,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
     .select({
       userId: users.id, tenantId: users.tenantId, role: users.role, name: users.name,
       email: users.email, isActive: users.isActive, canEnterCashExpense: users.canEnterCashExpense,
+      canEnterOutlay: users.canEnterOutlay, canViewReports: users.canViewReports, canViewBank: users.canViewBank,
       tenantName: tenants.name, tenantStatus: tenants.status,
     })
     .from(sessions)
@@ -56,6 +60,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
   return {
     userId: r.userId, tenantId: r.tenantId, role: r.role, name: r.name,
     email: r.email, tenantName: r.tenantName, canEnterCashExpense: r.canEnterCashExpense,
+    canEnterOutlay: r.canEnterOutlay, canViewReports: r.canViewReports, canViewBank: r.canViewBank,
   };
 }
 

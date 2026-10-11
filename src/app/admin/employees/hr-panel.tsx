@@ -59,7 +59,9 @@ export function HrPanel({ employeeId, profile, documents, payslips }: {
         </Field>
         <Field label="Krankenkasse"><input name="healthInsuranceName" defaultValue={d("healthInsuranceName")} className={inputCls} dir="auto" /></Field>
         <Field label="KV-Zusatzbeitrag (BP)" hint="250 = 2,50 %"><input name="kvAdditionalBp" type="number" defaultValue={d("kvAdditionalBp") || "250"} className={inputCls} /></Field>
-        <Field label="Brutto / Monat"><input name="monthlyGrossCents" defaultValue={typeof p.monthlyGrossCents === "number" ? (p.monthlyGrossCents / 100).toFixed(2).replace(".", ",") : ""} className={inputCls} /></Field>
+        <Field label="Stundenlohn (€/Std.)"><input name="hourlyRateCents" defaultValue={typeof p.hourlyRateCents === "number" && p.hourlyRateCents ? (p.hourlyRateCents / 100).toFixed(2).replace(".", ",") : ""} className={inputCls} /></Field>
+        <Field label="Arbeitsstunden / Monat"><input name="hoursPerMonth" defaultValue={d("hoursPerMonth")} className={inputCls} placeholder="z. B. 160" /></Field>
+        <Field label="Brutto / Monat" hint="Wird aus Stunden × Lohn berechnet, wenn leer"><input name="monthlyGrossCents" defaultValue={typeof p.monthlyGrossCents === "number" ? (p.monthlyGrossCents / 100).toFixed(2).replace(".", ",") : ""} className={inputCls} /></Field>
         <Field label="IBAN"><input name="iban" defaultValue={d("iban")} className={inputCls} /></Field>
         <Field label="Notizen" className="sm:col-span-2"><textarea name="notes" defaultValue={d("notes")} rows={2} className={cx(inputCls, "h-auto py-2")} dir="auto" /></Field>
         <div className="sm:col-span-2"><button disabled={busy} className={cx(btn.base, btn.primary)}>Personalakte speichern</button></div>
@@ -94,6 +96,8 @@ export function HrPanel({ employeeId, profile, documents, payslips }: {
       }}>
         <Field label="Jahr"><input name="year" type="number" required defaultValue={new Date().getFullYear()} className={inputCls} /></Field>
         <Field label="Monat"><input name="month" type="number" min={1} max={12} required defaultValue={new Date().getMonth() + 1} className={inputCls} /></Field>
+        <Field label="Stunden"><input name="hoursWorked" inputMode="decimal" placeholder={d("hoursPerMonth") || "Stunden"} className={inputCls} /></Field>
+        <Field label="€/Std."><input name="hourlyRateCents" placeholder={typeof p.hourlyRateCents === "number" && p.hourlyRateCents ? String(p.hourlyRateCents / 100) : ""} className={inputCls} /></Field>
         <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Lohnabrechnung erstellen</button>
       </form>
       <ul className="divide-y divide-line text-sm">

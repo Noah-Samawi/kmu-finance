@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { listEmployees } from "@/application/employees/employees";
 import { Empty, Money, PageHeader, Pill, Section } from "@/components/ui";
+import { formatCents } from "@/domain/money";
 import { fmtDateTime } from "@/domain/period";
 import { CreateEmployeeForm, ResetBudgetButton } from "./employee-forms";
 
@@ -26,8 +27,9 @@ export default async function EmployeesPage() {
                       <span className="block truncate text-sm text-muted">{e.email} – zuletzt angemeldet {fmtDateTime(e.lastLoginAt)}</span>
                     </span>
                     <span className="text-right">
-                      <span className="block text-xs text-muted">Guthaben</span>
+                      <span className="block text-xs text-muted">Budget / Auslage</span>
                       <Money cents={e.balanceCents} className="font-semibold" />
+                      {e.claimCents ? <span className="block text-xs text-muted">Anspruch {formatCents(e.claimCents)}</span> : null}
                     </span>
                   </Link>
                   <ResetBudgetButton id={e.id} balanceCents={e.balanceCents} />

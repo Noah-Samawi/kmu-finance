@@ -59,12 +59,14 @@ export async function issueInvoice(ctx: Ctx, id: string) {
       issuer: {
         legalName: t.legalName, street: t.street, zip: t.zip, city: t.city, taxNumber: t.taxNumber,
         vatId: t.vatId, iban: t.iban, bic: t.bic, smallBusiness: t.smallBusiness,
+        logoKey: t.logoKey, invoiceFooter: t.invoiceFooter,
       },
       recipient: { name: c.name, street: c.street, zip: c.zip, city: c.city, vatId: c.vatId },
     };
     const pdfKey = await storePdf(tenantId, number, {
       ...snapshot, number, isDraft: false, isCancellation: false, issueDate, serviceDate, dueDate,
       notes: inv.notes, items, netCents: inv.netCents, vatCents: inv.vatCents, grossCents: inv.grossCents,
+      paymentMethod: inv.paymentMethod ?? t.defaultPaymentMethod,
     });
     await tx.update(invoices).set({
       status: "OPEN", number, issueDate, serviceDate, dueDate, recipientSnapshot: snapshot, pdfKey,
@@ -88,9 +90,10 @@ export async function markInvoicePaid(ctx: Ctx, id: string, paidAtInput?: string
     const inv = await lockInvoice(tx, tenantId, id);
     if (!canMarkPaid(inv.status)) throw rule("Nur offene Rechnungen können als bezahlt markiert werden");
     await tx.update(invoices).set({ status: "PAID", paidAt }).where(eq(invoices.id, id));
+    const account = inv.paymentMethod === "CASH" ? "CASH" : "BANK";
     await insertEntry(tx, ctx, tenantId, {
-      type: "INCOME_INVOICE", ...deltasFor("INCOME_INVOICE", inv.grossCents, "BANK"),
-      invoiceId: id, bookingDate: paidAt, description: `Zahlungseingang ${inv.number}`,
+      type: "INCOME_INVOICE", ...deltasFor("INCOME_INVOICE", inv.grossCents, account),
+      invoiceId: id, bookingDate: paidAt, description: `Zahlungseingang ${inv.number} (${account === "CASH" ? "Bar" : "Überweisung"})`,
     });
     await audit(tx, ctx, "invoice.paid", "Invoice", id, { grossCents: inv.grossCents });
     return loadInvoiceFull(tx, tenantId, id);
@@ -142,6 +145,7 @@ export async function cancelInvoice(ctx: Ctx, id: string, reason: string) {
       ...snapshot, number, isDraft: false, isCancellation: true, cancelsNumber: inv.number,
       issueDate, serviceDate: inv.serviceDate, dueDate: null, notes, items: negItems,
       netCents: -inv.netCents, vatCents: -inv.vatCents, grossCents: -inv.grossCents,
+      paymentMethod: inv.paymentMethod,
     });
     const [storno] = await tx.insert(invoices).values({
       tenantId, contactId: inv.contactId, number, status: "CANCELED", issueDate,
@@ -166,8 +170,9 @@ export async function getInvoicePdf(ctx: Ctx, id: string): Promise<{ filename: s
   const data = await renderInvoicePdf({
     number: null, isDraft: true, isCancellation: false, issueDate: new Date(),
     serviceDate: inv.serviceDate, dueDate: inv.dueDate, notes: inv.notes, items: inv.items,
-    issuer: { ...t!, smallBusiness: t!.smallBusiness },
+    issuer: { ...t!, smallBusiness: t!.smallBusiness, logoKey: t!.logoKey, invoiceFooter: t!.invoiceFooter },
     recipient: inv.contact, netCents: inv.netCents, vatCents: inv.vatCents, grossCents: inv.grossCents,
+    paymentMethod: inv.paymentMethod,
   });
   return { filename: `Entwurf-${inv.id.slice(0, 8)}.pdf`, data };
 }

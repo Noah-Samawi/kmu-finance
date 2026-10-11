@@ -30,7 +30,7 @@ export async function getTenant(ctx: Ctx, id: string) {
 
 /** Eigene Firmendaten (für Admin/Mitarbeiter) */
 export async function getOwnTenant(ctx: Ctx) {
-  requireRole(ctx, "ADMIN", "EMPLOYEE");
+  requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   const t = await db.query.tenants.findFirst({ where: eq(tenants.id, ctx.tenantId ?? "") });
   if (!t) throw notFound("Mandant");
   return t;

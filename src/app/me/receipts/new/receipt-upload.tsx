@@ -34,12 +34,13 @@ export function ReceiptUpload({ balanceCents, today }: { balanceCents: number; t
   const [preview, setPreview] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [done, setDone] = useState<number | null>(null);
+  const [asOutlay, setAsOutlay] = useState(false);
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
   let cents: number | null = null;
   try { cents = amount ? parseEuroToCents(amount) : null; } catch { cents = null; }
-  const over = cents !== null && cents > balanceCents;
+  const over = cents !== null && cents > balanceCents && !asOutlay;
 
   async function pick(f: File | undefined) {
     if (!f) return;
@@ -56,6 +57,7 @@ export function ReceiptUpload({ balanceCents, today }: { balanceCents: number; t
     const fd = new FormData(e.currentTarget);
     fd.set("file", file);
     fd.set("amount", amount);
+    if (asOutlay) fd.set("asOutlay", "true");
     const res = await call<{ walletBalanceCents: number }>("POST", "/api/v1/receipts", fd);
     if (res) setDone(res.walletBalanceCents);
   }
@@ -106,6 +108,10 @@ export function ReceiptUpload({ balanceCents, today }: { balanceCents: number; t
           <VatSelect name="vatRate" defaultValue="" allowEmpty />
         </Field>
       </div>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" checked={asOutlay} onChange={(e) => setAsOutlay(e.target.checked)} className="mt-1 accent-[var(--color-ledger)]" />
+        <span>Privates Geld ausgelegt (nicht genug Kassenbestand). Wird als Anspruch gegenüber der Firma gebucht.</span>
+      </label>
       <Field label="Wofür? (optional)"><input name="description" placeholder="z. B. Mehl und Butter" className={inputCls} /></Field>
       <ErrorNote error={error} />
       <button disabled={busy || over || !cents} className={cx(btn.base, btn.primary, "h-14 w-full text-base")}>

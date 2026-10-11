@@ -63,6 +63,9 @@ describe("ledger", () => {
     expect(deltasFor("RETURN", 500, "BANK")).toMatchObject({ poolDeltaCents: 500, bankDeltaCents: 500, walletDeltaCents: -500 });
     expect(deltasFor("CASH_WITHDRAWAL", 200)).toMatchObject({ cashDeltaCents: 200, bankDeltaCents: -200, poolDeltaCents: 0 });
     expect(reversalDeltas(deltasFor("ALLOCATION", 500))).toMatchObject({ poolDeltaCents: 500, walletDeltaCents: -500 });
+    expect(deltasFor("EMPLOYEE_OUTLAY", 800)).toMatchObject({ claimDeltaCents: 800, poolDeltaCents: 0, walletDeltaCents: 0 });
+    expect(deltasFor("OUTLAY_REPAY", 800, "BANK")).toMatchObject({ claimDeltaCents: -800, bankDeltaCents: -800, poolDeltaCents: -800 });
+    expect(deltasFor("PARTNER_DEPOSIT", 1000, "BANK")).toMatchObject({ partnerDeltaCents: 1000, bankDeltaCents: 1000 });
   });
   it("nur positive Ganzzahlen", () => {
     expect(() => deltasFor("RECEIPT", 0)).toThrow();

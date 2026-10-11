@@ -11,7 +11,7 @@ import { dateInputToDate, todayKey } from "@/domain/period";
 import { formatCents } from "@/domain/money";
 import { receiptFieldsSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
-import { audit, insertEntry, walletBalance } from "../ledger-service";
+import { audit, claimBalance, insertEntry, walletBalance } from "../ledger-service";
 import { ALLOWED_MIME, resolveReceiptMime } from "./mime";
 import { parseReceiptDataUrl, toReceiptDataUrl } from "./inline-file";
 
@@ -95,9 +95,14 @@ export async function submitReceipt(
       });
       if (dup) throw conflict("Dieser Beleg wurde bereits hochgeladen");
 
+      const asOutlay = !!input.asOutlay;
+      if (asOutlay) {
+        const me = await tx.query.users.findFirst({ where: eq(users.id, ctx.userId) });
+        if (!me?.canEnterOutlay) throw forbidden("Auslagen sind für dich nicht freigeschaltet");
+      }
       const balance = await walletBalance(tx, tenantId, ctx.userId);
-      if (input.amountCents > balance) {
-        throw rule(`Beleg (${formatCents(input.amountCents)}) übersteigt dein Guthaben (${formatCents(balance)}). Bitte bei der Geschäftsführung melden.`);
+      if (!asOutlay && input.amountCents > balance) {
+        throw rule(`Beleg (${formatCents(input.amountCents)}) übersteigt dein Guthaben (${formatCents(balance)}). Als Auslage (privates Geld) einreichen oder Geschäftsführung fragen.`);
       }
 
       const [r] = await tx.insert(receipts).values({
@@ -107,11 +112,17 @@ export async function submitReceipt(
         fileKey, fileMime: mime, fileSha256: sha,
       }).returning();
       await insertEntry(tx, ctx, tenantId, {
-        type: "RECEIPT", ...deltasFor("RECEIPT", input.amountCents), employeeId: ctx.userId,
-        receiptId: r.id, description: `${input.merchant}${input.description ? ` – ${input.description}` : ""}`,
+        type: asOutlay ? "EMPLOYEE_OUTLAY" : "RECEIPT",
+        ...(asOutlay ? deltasFor("EMPLOYEE_OUTLAY", input.amountCents) : deltasFor("RECEIPT", input.amountCents)),
+        employeeId: ctx.userId,
+        receiptId: r.id, description: `${asOutlay ? "Auslage · " : ""}${input.merchant}${input.description ? ` – ${input.description}` : ""}`,
       });
-      await audit(tx, ctx, "receipt.submitted", "Receipt", r.id, { amountCents: input.amountCents });
-      return { receipt: r, walletBalanceCents: balance - input.amountCents };
+      await audit(tx, ctx, asOutlay ? "receipt.outlay" : "receipt.submitted", "Receipt", r.id, { amountCents: input.amountCents });
+      return {
+        receipt: r,
+        walletBalanceCents: asOutlay ? balance : balance - input.amountCents,
+        claimBalanceCents: asOutlay ? await claimBalance(tx, tenantId, ctx.userId) : 0,
+      };
     });
   } catch (e) {
     if (isAppError(e)) throw e;

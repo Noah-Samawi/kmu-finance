@@ -132,6 +132,57 @@ export class PdfWriter {
     });
   }
 
+  async embedImage(dataUrlOrBytes: string | Uint8Array) {
+    const bytes = typeof dataUrlOrBytes === "string"
+      ? Buffer.from(dataUrlOrBytes.replace(/^data:image\/\w+;base64,/, ""), "base64")
+      : dataUrlOrBytes;
+    try {
+      return await this.doc.embedPng(bytes);
+    } catch {
+      return this.doc.embedJpg(bytes);
+    }
+  }
+
+  /** Tabelle mit Rahmen (DATEV-ähnlich) */
+  tableBoxed(cols: { title: string; width: number; align?: "left" | "right" }[], rows: string[][], size = 9) {
+    const rowH = size + 8;
+    const totalW = cols.reduce((s, c) => s + c.width, 0);
+    const drawHeader = () => {
+      this.ensureSpace(rowH + 8);
+      const top = this.y + size;
+      this.page.drawRectangle({
+        x: MARGIN, y: this.y - 4, width: totalW, height: rowH,
+        color: rgb(0.93, 0.94, 0.96),
+      });
+      let x = MARGIN;
+      for (const c of cols) {
+        this.text(c.title, { x: x + 3, size, bold: true, align: c.align, width: c.width - 6 });
+        x += c.width;
+      }
+      this.y -= rowH;
+      this.page.drawLine({ start: { x: MARGIN, y: this.y + 2 }, end: { x: MARGIN + totalW, y: this.y + 2 }, thickness: 0.8, color: rgb(0.2, 0.2, 0.22) });
+      void top;
+    };
+    drawHeader();
+    for (const r of rows) {
+      if (this.y - rowH < MARGIN + 24) {
+        this.newPage();
+        drawHeader();
+      }
+      const yLine = this.y + size + 2;
+      let x = MARGIN;
+      cols.forEach((c, i) => {
+        const cell = this.clean(r[i] ?? "");
+        this.text(cell, { x: x + 3, size, align: c.align, width: c.width - 6 });
+        this.page.drawLine({ start: { x, y: this.y - 4 }, end: { x, y: yLine }, thickness: 0.4, color: rgb(0.75, 0.75, 0.78) });
+        x += c.width;
+      });
+      this.page.drawLine({ start: { x: MARGIN + totalW, y: this.y - 4 }, end: { x: MARGIN + totalW, y: yLine }, thickness: 0.4, color: rgb(0.75, 0.75, 0.78) });
+      this.y -= rowH;
+      this.page.drawLine({ start: { x: MARGIN, y: this.y + 2 }, end: { x: MARGIN + totalW, y: this.y + 2 }, thickness: 0.4, color: rgb(0.75, 0.75, 0.78) });
+    }
+  }
+
   save() {
     return this.doc.save();
   }

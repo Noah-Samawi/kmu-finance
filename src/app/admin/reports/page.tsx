@@ -50,14 +50,14 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <div className="mb-6 grid gap-3 sm:grid-cols-2">
           <Section title="Kasse (Bar)">
             <dl className="space-y-1.5 tabular">
-              <Line label="Anfang" cents={s.cash.openingCents} />
-              <Line label="Ende" cents={s.cash.closingCents} strong />
+              <Line label="Saldo-Übertrag (Anfang)" cents={s.cash.openingCents} />
+              <Line label="Ende (wird nächster Übertrag)" cents={s.cash.closingCents} strong />
             </dl>
           </Section>
           <Section title="Bankkonto">
             <dl className="space-y-1.5 tabular">
-              <Line label="Anfang" cents={s.bank.openingCents} />
-              <Line label="Ende" cents={s.bank.closingCents} strong />
+              <Line label="Saldo-Übertrag (Anfang)" cents={s.bank.openingCents} />
+              <Line label="Ende (wird nächster Übertrag)" cents={s.bank.closingCents} strong />
             </dl>
           </Section>
         </div>
@@ -68,24 +68,38 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <dl className="space-y-1.5 tabular">
             <Line label="Mit Beleg" cents={s.totals.receiptsCents} />
             <Line label="Ausgleich ohne Beleg" cents={s.totals.adjustmentsCents} />
-            <Line label="Offene Guthaben am Ende" cents={s.totals.walletsOpenCents} strong />
+            <Line label="Offene Budgets am Ende" cents={s.totals.walletsOpenCents} />
+            <Line label="Offene Auslagen-Ansprüche" cents={s.totals.claimsOpenCents ?? 0} strong />
           </dl>
         </Section>
       </div>
 
-      <Section title="Mitarbeiterkonten" className="mt-6" flush>
-        <Table head={["Mitarbeiter", "Anfang", "Erhalten", "Belege", "Ausgleich", "Zurück", "Rest"].map((h, i) => <span key={h} className={i ? "block text-right" : ""}>{h}</span>)}>
+      <Section title="Mitarbeiterkonten (Budget / Auslagen, mit Übertrag)" className="mt-6" flush>
+        <Table head={["Mitarbeiter", "Budget Anfang", "Erhalten", "Belege", "Budget Ende", "Anspruch", "Saldo vs. Firma"].map((h, i) => <span key={h} className={i ? "block text-right" : ""}>{h}</span>)}>
           {s.employees.map((e) => (
             <tr key={e.employeeId}>
               <td className={td + " font-medium"}>{e.name}</td>
-              {[e.openingCents, e.allocatedCents, e.receiptsCents, e.adjustmentsCents, e.returnedCents].map((v, i) => (
+              {[e.openingCents, e.allocatedCents, e.receiptsCents, e.closingCents, e.claimClosingCents, e.firmBalanceCents].map((v, i) => (
                 <td key={i} className={td + " text-right"}><Money cents={v} /></td>
               ))}
-              <td className={td + " text-right font-semibold"}><Money cents={e.closingCents} /></td>
             </tr>
           ))}
         </Table>
       </Section>
+      {s.partners?.length > 0 && (
+        <Section title="Gesellschafter-Kapitalkonten" className="mt-6" flush>
+          <Table head={["Gesellschafter", "Übertrag", "Einlagen", "Entnahmen", "Gewinn", "Ende"].map((h, i) => <span key={h} className={i ? "block text-right" : ""}>{h}</span>)}>
+            {s.partners.map((p) => (
+              <tr key={p.partnerId}>
+                <td className={td + " font-medium"}>{p.name}</td>
+                {[p.openingCents, p.depositCents, p.drawCents, p.profitCents, p.closingCents].map((v, i) => (
+                  <td key={i} className={td + " text-right"}><Money cents={v} /></td>
+                ))}
+              </tr>
+            ))}
+          </Table>
+        </Section>
+      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Section title={`Einzelbuchungen (${entries.length})`} flush>
@@ -124,7 +138,7 @@ function PoolSummary({ s }: { s: Summary }) {
   return (
     <Section title="Kassenbestand">
       <dl className="space-y-1.5 tabular">
-        <Line label="Anfangsbestand" cents={s.pool.openingCents} />
+        <Line label="Saldo-Übertrag (Anfangsbestand)" cents={s.pool.openingCents} />
         <Line label="+ Einnahmen aus Rechnungen" cents={s.pool.incomeInvoiceCents} />
         <Line label="+ Weitere Einnahmen" cents={s.pool.incomeManualCents} />
         <Line label="− An Mitarbeiter verteilt" cents={s.pool.allocatedCents} />

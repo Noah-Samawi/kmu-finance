@@ -15,6 +15,7 @@ export interface EditorInitial {
   serviceDate: string;
   dueDate: string;
   notes: string;
+  paymentMethod?: "TRANSFER" | "CASH";
   items: { description: string; quantity: string; unit: string; unitPriceCents: number; vatRate: number }[];
 }
 
@@ -33,6 +34,7 @@ export function InvoiceEditor({ contacts, initial, smallBusiness }: {
   const [serviceDate, setServiceDate] = useState(initial?.serviceDate ?? "");
   const [dueDate, setDueDate] = useState(initial?.dueDate ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [paymentMethod, setPaymentMethod] = useState<"TRANSFER" | "CASH">(initial?.paymentMethod ?? "TRANSFER");
   const [items, setItems] = useState<Item[]>(
     initial?.items.length
       ? initial.items.map((i) => ({ description: i.description, quantity: String(Number(i.quantity)).replace(".", ","), unit: i.unit, price: centsToPlain(i.unitPriceCents), vatRate: i.vatRate }))
@@ -55,7 +57,7 @@ export function InvoiceEditor({ contacts, initial, smallBusiness }: {
   async function save(issue: boolean) {
     if (!contactId) return setError("Bitte einen Kunden wählen");
     const payload = {
-      contactId, serviceDate: serviceDate || null, dueDate: dueDate || null, notes,
+      contactId, serviceDate: serviceDate || null, dueDate: dueDate || null, notes, paymentMethod,
       items: items.filter((i) => i.description || i.price).map((i) => ({
         description: i.description, quantity: i.quantity, unit: i.unit, unitPriceCents: i.price, vatRate: i.vatRate,
       })),
@@ -74,7 +76,7 @@ export function InvoiceEditor({ contacts, initial, smallBusiness }: {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 rounded-xl border border-line bg-surface p-4 md:grid-cols-[2fr_1fr_1fr] md:p-5">
+      <div className="grid gap-3 rounded-xl border border-line bg-surface p-4 md:grid-cols-[2fr_1fr_1fr_1fr] md:p-5">
         <Field label="Kunde">
           <select value={contactId} onChange={(e) => setContactId(e.target.value)} className={inputCls} required>
             <option value="">Bitte wählen …</option>
@@ -86,6 +88,12 @@ export function InvoiceEditor({ contacts, initial, smallBusiness }: {
         </Field>
         <Field label="Fällig am" hint="Leer = Standard-Zahlungsziel">
           <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Zahlungsart">
+          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "TRANSFER" | "CASH")} className={inputCls}>
+            <option value="TRANSFER">Überweisung</option>
+            <option value="CASH">Barzahlung</option>
+          </select>
         </Field>
       </div>
 
@@ -99,7 +107,7 @@ export function InvoiceEditor({ contacts, initial, smallBusiness }: {
               if (it.price && !bad) line = calcLine({ description: "", quantity: it.quantity.replace(",", ".") || "0", unit: "", unitPriceCents: safeCents(it.price), vatRate: 0 }, 1);
             } catch { line = null; }
             return (
-              <div key={idx} className="grid grid-cols-6 gap-2 px-4 py-3 md:grid-cols-[1fr_90px_80px_120px_100px_110px_36px] md:items-end md:px-5">
+              <div key={idx} className="grid grid-cols-6 gap-2 px-4 py-3 md:grid-cols-[1fr_90px_80px_120px_140px_110px_36px] md:items-end md:px-5">
                 <Field label="Beschreibung" className="col-span-6 md:col-span-1">
                   <input value={it.description} onChange={(e) => set(idx, { description: e.target.value })} className={inputCls} placeholder="z. B. Catering 30 Personen" />
                 </Field>

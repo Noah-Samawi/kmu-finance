@@ -67,9 +67,10 @@ export default async function DashboardPage() {
                   <Link href={`/admin/employees/${e.employeeId}`} className="flex items-center justify-between px-4 py-3 hover:bg-paper md:px-5">
                     <span>
                       <span className="font-medium">{e.name}</span>
-                      <span className="block text-sm text-muted">Diesen Monat {formatCents(e.receiptsCents)} belegt</span>
+                      <span className="block text-sm text-muted">Diesen Monat {formatCents(e.receiptsCents)} belegt
+                        {e.claimClosingCents ? ` · Anspruch ${formatCents(e.claimClosingCents)}` : ""}</span>
                     </span>
-                    <Money cents={e.closingCents} className="font-semibold" />
+                    <Money cents={e.firmBalanceCents} className="font-semibold" />
                   </Link>
                 </li>
               ))}

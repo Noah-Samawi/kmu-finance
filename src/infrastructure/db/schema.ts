@@ -22,7 +22,7 @@ const updatedAt = () =>
 // ---------------------------------------------------------------------
 // ENUMS
 // ---------------------------------------------------------------------
-export const roleEnum = pgEnum("Role", ["SUPER_ADMIN", "ADMIN", "EMPLOYEE"]);
+export const roleEnum = pgEnum("Role", ["SUPER_ADMIN", "ADMIN", "EMPLOYEE", "PARTNER"]);
 export const tenantStatusEnum = pgEnum("TenantStatus", ["ACTIVE", "SUSPENDED"]);
 export const contactTypeEnum = pgEnum("ContactType", ["CUSTOMER", "SUPPLIER", "BOTH"]);
 // "Überfällig" wird NICHT gespeichert: OPEN && dueDate < heute
@@ -37,7 +37,13 @@ export const ledgerTypeEnum = pgEnum("LedgerType", [
   "REVERSAL",       // negierte Deltas einer anderen Buchung
   "CASH_WITHDRAWAL", // Bank -, Kasse +  (Geldautomat, kein Aufwand)
   "ACCOUNT_ADJUST", // manuelle Korrektur Kasse oder Bank
+  "EMPLOYEE_OUTLAY", // Anspruch MA +   (privates Geld für Firma)
+  "OUTLAY_REPAY",    // Anspruch MA -, Kasse/Bank - (Erstattung)
+  "PARTNER_DEPOSIT", // Einlage Gesellschafter
+  "PARTNER_DRAW",    // Entnahme Gesellschafter
+  "PARTNER_PROFIT",  // Gewinnanteil
 ]);
+export const paymentMethodEnum = pgEnum("PaymentMethod", ["TRANSFER", "CASH"]);
 export const accountKindEnum = pgEnum("AccountKind", ["CASH", "BANK"]);
 export const hrDocKindEnum = pgEnum("HrDocKind", ["ID", "CONTRACT", "TIMESHEET", "TAX", "PAYSLIP", "OTHER"]);
 export const reconcileStatusEnum = pgEnum("ReconcileStatus", ["GREEN", "RED", "CASH_WITHDRAWAL"]);
@@ -66,6 +72,9 @@ export const tenants = pgTable("Tenant", {
   smallBusiness: boolean("smallBusiness").notNull().default(false), // § 19 UStG
   invoicePrefix: text("invoicePrefix").notNull().default("RE"),
   defaultPaymentDays: integer("defaultPaymentDays").notNull().default(14),
+  logoKey: text("logoKey"),
+  invoiceFooter: text("invoiceFooter"),
+  defaultPaymentMethod: paymentMethodEnum("defaultPaymentMethod").notNull().default("TRANSFER"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -79,6 +88,9 @@ export const users = pgTable("User", {
   role: roleEnum("role").notNull(),
   isActive: boolean("isActive").notNull().default(true),
   canEnterCashExpense: boolean("canEnterCashExpense").notNull().default(false),
+  canEnterOutlay: boolean("canEnterOutlay").notNull().default(true),
+  canViewReports: boolean("canViewReports").notNull().default(false),
+  canViewBank: boolean("canViewBank").notNull().default(false),
   lastLoginAt: timestamp("lastLoginAt", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -134,6 +146,7 @@ export const invoices = pgTable("Invoice", {
   vatCents: integer("vatCents").notNull().default(0),
   grossCents: integer("grossCents").notNull().default(0),
   notes: text("notes"),
+  paymentMethod: paymentMethodEnum("paymentMethod").notNull().default("TRANSFER"),
   pdfKey: text("pdfKey"),
   cancelsInvoiceId: text("cancelsInvoiceId").unique().references((): AnyPgColumn => invoices.id),
   createdAt: createdAt(),
@@ -209,6 +222,8 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   poolDeltaCents: integer("poolDeltaCents").notNull().default(0),
   cashDeltaCents: integer("cashDeltaCents").notNull().default(0),
   bankDeltaCents: integer("bankDeltaCents").notNull().default(0),
+  claimDeltaCents: integer("claimDeltaCents").notNull().default(0),
+  partnerDeltaCents: integer("partnerDeltaCents").notNull().default(0),
   accountKind: accountKindEnum("accountKind"),
   walletDeltaCents: integer("walletDeltaCents").notNull().default(0),
   bookingDate: timestamp("bookingDate", { withTimezone: true }).notNull().defaultNow(),
@@ -262,6 +277,8 @@ export const employeeProfiles = pgTable("EmployeeProfile", {
   jobTitle: text("jobTitle"),
   startDate: timestamp("startDate", { withTimezone: true }),
   weeklyHours: numeric("weeklyHours", { precision: 5, scale: 2 }),
+  hourlyRateCents: integer("hourlyRateCents").notNull().default(0),
+  hoursPerMonth: numeric("hoursPerMonth", { precision: 8, scale: 2 }),
   monthlyGrossCents: integer("monthlyGrossCents").notNull().default(0),
   notes: text("notes"),
   createdAt: createdAt(),
@@ -288,6 +305,8 @@ export const payslips = pgTable("Payslip", {
   year: integer("year").notNull(),
   month: integer("month").notNull(),
   grossCents: integer("grossCents").notNull(),
+  hoursWorked: numeric("hoursWorked", { precision: 8, scale: 2 }),
+  hourlyRateCents: integer("hourlyRateCents").notNull().default(0),
   taxClass: integer("taxClass").notNull(),
   childAllowances: integer("childAllowances").notNull().default(0),
   churchTax: churchTaxEnum("churchTax").notNull().default("NONE"),

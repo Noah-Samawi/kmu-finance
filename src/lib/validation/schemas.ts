@@ -66,6 +66,59 @@ export const employeeUpdateSchema = z.object({
   isActive: z.boolean().optional(),
   password: passwordSchema.optional(),
   canEnterCashExpense: z.boolean().optional(),
+  canEnterOutlay: z.boolean().optional(),
+});
+
+export const partnerCreateSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().toLowerCase().email(),
+  password: passwordSchema,
+  canViewReports: z.boolean().default(false),
+  canViewBank: z.boolean().default(false),
+});
+
+export const partnerUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  isActive: z.boolean().optional(),
+  password: passwordSchema.optional(),
+  canViewReports: z.boolean().optional(),
+  canViewBank: z.boolean().optional(),
+});
+
+export const partnerBookSchema = z.object({
+  type: z.enum(["PARTNER_DEPOSIT", "PARTNER_DRAW", "PARTNER_PROFIT"]),
+  amountCents: positiveAmount,
+  description: z.string().trim().min(3).max(300),
+  accountKind: z.enum(["CASH", "BANK"]).default("BANK"),
+});
+
+export const outlaySchema = z.object({
+  amountCents: positiveAmount,
+  description: z.string().trim().min(3, "Wofür?").max(300),
+  bookingDate: dateStr.optional(),
+});
+
+export const outlayRepaySchema = z.object({
+  amountCents: positiveAmount.optional(),
+  all: z.boolean().default(false),
+  accountKind: z.enum(["CASH", "BANK"]).default("CASH"),
+  description: z.string().trim().min(3).max(300),
+}).refine((v) => v.all || v.amountCents !== undefined, "Betrag oder 'alles' angeben");
+
+export const letterheadSchema = z.object({
+  legalName: z.string().trim().min(2).max(200).optional(),
+  street: z.string().trim().min(2).max(200).optional(),
+  zip: z.string().trim().min(4).max(10).optional(),
+  city: z.string().trim().min(2).max(100).optional(),
+  taxNumber: optStr(),
+  vatId: optStr(),
+  iban: optStr(),
+  bic: optStr(),
+  invoicePrefix: z.string().trim().regex(/^[A-Z0-9]{1,6}$/).optional(),
+  defaultPaymentDays: z.coerce.number().int().min(0).max(120).optional(),
+  invoiceFooter: optStr(2000),
+  defaultPaymentMethod: z.enum(["TRANSFER", "CASH"]).optional(),
+  logoDataUrl: z.string().max(2_000_000).optional().nullable(),
 });
 
 export const cashExpenseSchema = z.object({
@@ -92,7 +145,9 @@ export const invoiceItemSchema = z.object({
     .refine((v) => /^\d+(\.\d{1,3})?$/.test(v) && Number(v) > 0, "Menge > 0, max. 3 Nachkommastellen"),
   unit: z.string().trim().min(1).max(20).default("Stk"),
   unitPriceCents: positiveAmount,
-  vatRate: z.number().int().refine(isAllowedVatRate, "USt.-Satz: 0 % bis 20 %"),
+  vatRate: z.coerce.number().int()
+    .transform((n) => (n >= 0 && n <= 20 ? n * 100 : n))
+    .refine(isAllowedVatRate, "USt.-Satz: 0 % bis 20 %"),
 });
 
 export const invoiceDraftSchema = z.object({
@@ -100,6 +155,7 @@ export const invoiceDraftSchema = z.object({
   serviceDate: dateStr.optional().nullable(),
   dueDate: dateStr.optional().nullable(),
   notes: optStr(2000),
+  paymentMethod: z.enum(["TRANSFER", "CASH"]).optional(),
   items: z.array(invoiceItemSchema).max(200).default([]),
 });
 export const invoiceDraftUpdateSchema = invoiceDraftSchema.partial();
@@ -165,6 +221,8 @@ export const receiptFieldsSchema = z.object({
   merchant: z.string().trim().min(1).max(200),
   description: optStr(500),
   receiptDate: dateStr,
+  asOutlay: z.union([z.boolean(), z.string()]).optional()
+    .transform((v) => v === true || v === "true" || v === "1" || v === "on"),
   vatRate: z.coerce.number().int().optional().nullable()
     .transform((v) => (v == null || Number.isNaN(v) ? null : v <= 20 ? v * 100 : v))
     .refine((v) => v == null || isAllowedVatRate(v), "USt.-Satz: 0 % bis 20 %"),
@@ -204,6 +262,8 @@ export const hrProfileSchema = z.object({
   jobTitle: optStr(120),
   startDate: dateStr.optional().nullable(),
   weeklyHours: z.string().trim().max(8).optional().nullable(),
+  hourlyRateCents: z.preprocess((v) => (v === "" || v == null ? undefined : v), amountCents.optional()),
+  hoursPerMonth: z.string().trim().max(12).optional().nullable(),
   monthlyGrossCents: z.preprocess((v) => (v === "" || v == null ? undefined : v), amountCents.optional()),
   notes: optStr(4000),
 });
@@ -211,5 +271,7 @@ export const hrProfileSchema = z.object({
 export const payslipCreateSchema = z.object({
   year: z.coerce.number().int().min(2020).max(2100),
   month: z.coerce.number().int().min(1).max(12),
+  hoursWorked: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().min(0).max(744).optional()),
+  hourlyRateCents: z.preprocess((v) => (v === "" || v == null ? undefined : v), amountCents.optional()),
   grossCents: positiveAmount.optional(),
 });

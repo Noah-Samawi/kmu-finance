@@ -48,7 +48,13 @@ export async function upsertProfile(ctx: Ctx, employeeId: string, input: z.infer
       iban: input.iban, bic: input.bic, jobTitle: input.jobTitle,
       startDate: input.startDate ? dateInputToDate(input.startDate) : null,
       weeklyHours: input.weeklyHours || null,
-      monthlyGrossCents: input.monthlyGrossCents ?? 0, notes: input.notes,
+      hourlyRateCents: input.hourlyRateCents ?? 0,
+      hoursPerMonth: input.hoursPerMonth || null,
+      monthlyGrossCents: input.monthlyGrossCents ?? (
+        input.hourlyRateCents && input.hoursPerMonth
+          ? Math.round(Number(String(input.hoursPerMonth).replace(",", ".")) * input.hourlyRateCents)
+          : 0
+      ), notes: input.notes,
     };
     const existing = await tx.query.employeeProfiles.findFirst({ where: eq(employeeProfiles.userId, employeeId) });
     const [row] = existing
@@ -100,8 +106,11 @@ export async function createPayslip(ctx: Ctx, employeeId: string, input: z.infer
   return withTenant(ctx, async (tx) => {
     const emp = await loadEmployee(tx, tenantId, employeeId, { requireActive: false });
     const profile = await tx.query.employeeProfiles.findFirst({ where: eq(employeeProfiles.userId, employeeId) });
-    const gross = input.grossCents ?? profile?.monthlyGrossCents ?? 0;
-    if (gross <= 0) throw conflict("Bitte Bruttolohn in der Personalakte oder hier angeben");
+    const hours = input.hoursWorked ?? (profile?.hoursPerMonth != null ? Number(profile.hoursPerMonth) : undefined);
+    const rate = input.hourlyRateCents ?? profile?.hourlyRateCents ?? 0;
+    const fromHours = hours != null && rate > 0 ? Math.round(hours * rate) : 0;
+    const gross = input.grossCents ?? (fromHours || profile?.monthlyGrossCents || 0);
+    if (gross <= 0) throw conflict("Bitte Bruttolohn oder Stunden × Stundenlohn angeben");
     const calc = calculatePayslip({
       grossCents: gross,
       taxClass: profile?.taxClass ?? 1,
@@ -116,11 +125,14 @@ export async function createPayslip(ctx: Ctx, employeeId: string, input: z.infer
     const pdf = await renderPayslipPdf({
       employerName: ctx.tenantName ?? "Betrieb", employeeName: emp.name,
       year: input.year, month: input.month, ...calc,
+      hoursWorked: hours ?? null, hourlyRateCents: rate,
       taxClass: profile?.taxClass ?? 1, churchTax: profile?.churchTax ?? "NONE",
+      jobTitle: profile?.jobTitle ?? null, iban: profile?.iban ?? null,
     });
     const pdfKey = toReceiptDataUrl("application/pdf", Buffer.from(pdf));
     const [row] = await tx.insert(payslips).values({
       tenantId, employeeId, year: input.year, month: input.month,
+      hoursWorked: hours != null ? String(hours) : null, hourlyRateCents: rate,
       ...calc, taxClass: profile?.taxClass ?? 1,
       childAllowances: profile?.childAllowances ?? 0,
       churchTax: profile?.churchTax ?? "NONE",

@@ -12,7 +12,10 @@ import { formatCents } from "@/domain/money";
 import type { Ctx } from "./context";
 
 async function sumCol(
-  tx: Tx, tenantId: string, col: typeof ledgerEntries.poolDeltaCents | typeof ledgerEntries.cashDeltaCents | typeof ledgerEntries.bankDeltaCents, before?: Date,
+  tx: Tx, tenantId: string,
+  col: typeof ledgerEntries.poolDeltaCents | typeof ledgerEntries.cashDeltaCents | typeof ledgerEntries.bankDeltaCents
+    | typeof ledgerEntries.claimDeltaCents | typeof ledgerEntries.partnerDeltaCents,
+  before?: Date,
 ) {
   const [r] = await tx
     .select({ v: sql<string>`coalesce(sum(${col}), 0)::bigint` })
@@ -37,9 +40,13 @@ export async function accountBalance(tx: Tx, tenantId: string, kind: "CASH" | "B
   return kind === "CASH" ? cashBalance(tx, tenantId, before) : bankBalance(tx, tenantId, before);
 }
 
-export async function walletBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date): Promise<number> {
+async function sumEmployeeCol(
+  tx: Tx, tenantId: string, employeeId: string,
+  col: typeof ledgerEntries.walletDeltaCents | typeof ledgerEntries.claimDeltaCents | typeof ledgerEntries.partnerDeltaCents,
+  before?: Date,
+) {
   const [r] = await tx
-    .select({ v: sql<string>`coalesce(sum(${ledgerEntries.walletDeltaCents}), 0)::bigint` })
+    .select({ v: sql<string>`coalesce(sum(${col}), 0)::bigint` })
     .from(ledgerEntries)
     .where(and(
       eq(ledgerEntries.tenantId, tenantId),
@@ -49,12 +56,48 @@ export async function walletBalance(tx: Tx, tenantId: string, employeeId: string
   return Number(r.v);
 }
 
+export async function walletBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date): Promise<number> {
+  return sumEmployeeCol(tx, tenantId, employeeId, ledgerEntries.walletDeltaCents, before);
+}
+
+export async function claimBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date): Promise<number> {
+  return sumEmployeeCol(tx, tenantId, employeeId, ledgerEntries.claimDeltaCents, before);
+}
+
+export async function partnerBalance(tx: Tx, tenantId: string, partnerId: string, before?: Date): Promise<number> {
+  return sumEmployeeCol(tx, tenantId, partnerId, ledgerEntries.partnerDeltaCents, before);
+}
+
 /** Salden aller Mitarbeiter eines Mandanten in einer Abfrage */
 export async function walletBalancesByEmployee(tx: Tx, tenantId: string): Promise<Map<string, number>> {
   const rows = await tx
     .select({
       employeeId: ledgerEntries.employeeId,
       v: sql<string>`coalesce(sum(${ledgerEntries.walletDeltaCents}), 0)::bigint`,
+    })
+    .from(ledgerEntries)
+    .where(eq(ledgerEntries.tenantId, tenantId))
+    .groupBy(ledgerEntries.employeeId);
+  return new Map(rows.filter((r) => r.employeeId).map((r) => [r.employeeId!, Number(r.v)]));
+}
+
+export async function claimBalancesByEmployee(tx: Tx, tenantId: string): Promise<Map<string, number>> {
+  const rows = await tx
+    .select({
+      employeeId: ledgerEntries.employeeId,
+      v: sql<string>`coalesce(sum(${ledgerEntries.claimDeltaCents}), 0)::bigint`,
+    })
+    .from(ledgerEntries)
+    .where(eq(ledgerEntries.tenantId, tenantId))
+    .groupBy(ledgerEntries.employeeId);
+  return new Map(rows.filter((r) => r.employeeId).map((r) => [r.employeeId!, Number(r.v)]));
+}
+
+export async function partnerBalancesByPartner(tx: Tx, tenantId: string): Promise<Map<string, number>> {
+  const rows = await tx
+    .select({
+      employeeId: ledgerEntries.employeeId,
+      v: sql<string>`coalesce(sum(${ledgerEntries.partnerDeltaCents}), 0)::bigint`,
     })
     .from(ledgerEntries)
     .where(eq(ledgerEntries.tenantId, tenantId))
@@ -77,12 +120,23 @@ export async function loadEmployee(tx: Tx, tenantId: string, employeeId: string,
   return emp;
 }
 
+export async function loadPartner(tx: Tx, tenantId: string, partnerId: string, { requireActive = true } = {}) {
+  const p = await tx.query.users.findFirst({
+    where: and(eq(users.id, partnerId), eq(users.tenantId, tenantId), eq(users.role, "PARTNER")),
+  });
+  if (!p) throw notFound("Gesellschafter");
+  if (requireActive && !p.isActive) throw rule("Gesellschafter ist gesperrt");
+  return p;
+}
+
 export interface NewEntry {
   type: LedgerType;
   poolDeltaCents: number;
   walletDeltaCents: number;
   cashDeltaCents?: number;
   bankDeltaCents?: number;
+  claimDeltaCents?: number;
+  partnerDeltaCents?: number;
   accountKind?: "CASH" | "BANK" | null;
   employeeId?: string | null;
   invoiceId?: string | null;
@@ -103,6 +157,8 @@ export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntr
       ...e,
       cashDeltaCents,
       bankDeltaCents,
+      claimDeltaCents: e.claimDeltaCents ?? 0,
+      partnerDeltaCents: e.partnerDeltaCents ?? 0,
       poolDeltaCents: e.poolDeltaCents || cashDeltaCents + bankDeltaCents,
       bookingDate,
       tenantId,

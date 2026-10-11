@@ -6,7 +6,7 @@ import { invoices, ledgerEntries, periodClosings, receipts, users, type LedgerTy
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "../context";
-import { audit, bankBalance, cashBalance, poolBalance, walletBalance } from "../ledger-service";
+import { audit, bankBalance, cashBalance, claimBalance, partnerBalance, poolBalance, walletBalance } from "../ledger-service";
 
 export interface Range { start: Date; end: Date }
 
@@ -21,6 +21,7 @@ const reversed = aliasedTable(ledgerEntries, "reversed");
 export interface LedgerRow {
   id: string; type: LedgerType; bookingDate: Date;
   poolDeltaCents: number; cashDeltaCents: number; bankDeltaCents: number;
+  claimDeltaCents: number; partnerDeltaCents: number;
   accountKind: "CASH" | "BANK" | null;
   walletDeltaCents: number; description: string | null;
   employeeId: string | null; employeeName: string | null;
@@ -35,6 +36,7 @@ export async function ledgerRows(tx: Tx, tenantId: string, opts: { range?: Range
     id: ledgerEntries.id, type: ledgerEntries.type, bookingDate: ledgerEntries.bookingDate,
     poolDeltaCents: ledgerEntries.poolDeltaCents,
     cashDeltaCents: ledgerEntries.cashDeltaCents, bankDeltaCents: ledgerEntries.bankDeltaCents,
+    claimDeltaCents: ledgerEntries.claimDeltaCents, partnerDeltaCents: ledgerEntries.partnerDeltaCents,
     accountKind: ledgerEntries.accountKind,
     walletDeltaCents: ledgerEntries.walletDeltaCents,
     description: ledgerEntries.description, employeeId: ledgerEntries.employeeId, employeeName: users.name,
@@ -63,6 +65,13 @@ export interface EmployeeSummary {
   employeeId: string; name: string;
   openingCents: number; allocatedCents: number; receiptsCents: number;
   adjustmentsCents: number; returnedCents: number; closingCents: number;
+  claimOpeningCents: number; outlayCents: number; repayCents: number; claimClosingCents: number;
+  firmBalanceCents: number;
+}
+
+export interface PartnerSummary {
+  partnerId: string; name: string;
+  openingCents: number; depositCents: number; drawCents: number; profitCents: number; closingCents: number;
 }
 
 export interface Summary {
@@ -70,8 +79,10 @@ export interface Summary {
   pool: { openingCents: number; incomeInvoiceCents: number; incomeManualCents: number; allocatedCents: number; returnedCents: number; closingCents: number };
   cash: { openingCents: number; closingCents: number };
   bank: { openingCents: number; closingCents: number };
-  totals: { receiptsCents: number; adjustmentsCents: number; walletsOpenCents: number };
+  carryForward: { cashCents: number; bankCents: number; poolCents: number };
+  totals: { receiptsCents: number; adjustmentsCents: number; walletsOpenCents: number; claimsOpenCents: number };
   employees: EmployeeSummary[];
+  partners: PartnerSummary[];
   entryCount: number;
 }
 
@@ -92,9 +103,15 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
     : await tx.select({ id: users.id, name: users.name }).from(users)
         .where(and(eq(users.tenantId, tenantId), eq(users.role, "EMPLOYEE"))).orderBy(asc(users.name));
 
+  const sumClaim = (t: LedgerType, emp?: string) =>
+    rows.filter((r) => effType(r) === t && (!emp || r.employeeId === emp)).reduce((s, r) => s + r.claimDeltaCents, 0) + 0;
+  const sumPartner = (t: LedgerType, emp?: string) =>
+    rows.filter((r) => effType(r) === t && (!emp || r.employeeId === emp)).reduce((s, r) => s + r.partnerDeltaCents, 0) + 0;
+
   const employees: EmployeeSummary[] = [];
   for (const e of empList) {
     const opening = await walletBalance(tx, tenantId, e.id, range.start);
+    const claimOpening = await claimBalance(tx, tenantId, e.id, range.start);
     const s: EmployeeSummary = {
       employeeId: e.id, name: e.name, openingCents: opening,
       allocatedCents: sumWallet("ALLOCATION", e.id),
@@ -102,11 +119,36 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
       adjustmentsCents: neg(sumWallet("ADJUSTMENT", e.id)),
       returnedCents: neg(sumWallet("RETURN", e.id)),
       closingCents: 0,
+      claimOpeningCents: claimOpening,
+      outlayCents: sumClaim("EMPLOYEE_OUTLAY", e.id),
+      repayCents: neg(sumClaim("OUTLAY_REPAY", e.id)),
+      claimClosingCents: 0,
+      firmBalanceCents: 0,
     };
     s.closingCents = s.openingCents + s.allocatedCents - s.receiptsCents - s.adjustmentsCents - s.returnedCents;
-    if (onlyEmployeeId || s.openingCents || s.closingCents || s.allocatedCents || s.receiptsCents || s.adjustmentsCents || s.returnedCents) {
+    s.claimClosingCents = s.claimOpeningCents + s.outlayCents - s.repayCents;
+    s.firmBalanceCents = s.claimClosingCents - s.closingCents;
+    if (onlyEmployeeId || s.openingCents || s.closingCents || s.allocatedCents || s.receiptsCents || s.adjustmentsCents || s.returnedCents || s.claimOpeningCents || s.claimClosingCents) {
       employees.push(s);
     }
+  }
+
+  const partnerList = onlyEmployeeId
+    ? []
+    : await tx.select({ id: users.id, name: users.name }).from(users)
+        .where(and(eq(users.tenantId, tenantId), eq(users.role, "PARTNER"))).orderBy(asc(users.name));
+  const partners: PartnerSummary[] = [];
+  for (const p of partnerList) {
+    const opening = await partnerBalance(tx, tenantId, p.id, range.start);
+    const row: PartnerSummary = {
+      partnerId: p.id, name: p.name, openingCents: opening,
+      depositCents: sumPartner("PARTNER_DEPOSIT", p.id),
+      drawCents: neg(sumPartner("PARTNER_DRAW", p.id)),
+      profitCents: sumPartner("PARTNER_PROFIT", p.id),
+      closingCents: 0,
+    };
+    row.closingCents = row.openingCents + row.depositCents - row.drawCents + row.profitCents;
+    if (row.openingCents || row.closingCents || row.depositCents || row.drawCents || row.profitCents) partners.push(row);
   }
 
   const poolOpening = onlyEmployeeId ? 0 : await poolBalance(tx, tenantId, range.start);
@@ -128,30 +170,33 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
     from: fromKey, to: toKey, pool,
     cash: { openingCents: cashOpening, closingCents: cashOpening + cashMove },
     bank: { openingCents: bankOpening, closingCents: bankOpening + bankMove },
+    carryForward: { cashCents: cashOpening, bankCents: bankOpening, poolCents: poolOpening },
     totals: {
       receiptsCents: employees.reduce((s, e) => s + e.receiptsCents, 0),
       adjustmentsCents: employees.reduce((s, e) => s + e.adjustmentsCents, 0),
       walletsOpenCents: employees.reduce((s, e) => s + e.closingCents, 0),
+      claimsOpenCents: employees.reduce((s, e) => s + e.claimClosingCents, 0),
     },
     employees,
+    partners,
     entryCount: rows.length,
   };
 }
 
 /** Buchungsjournal mit Filtern. Mitarbeiter sehen nur ihr eigenes Konto. */
 export async function listLedger(ctx: Ctx, f: { from?: string; to?: string; employeeId?: string } = {}) {
-  requireRole(ctx, "ADMIN", "EMPLOYEE");
+  requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   const tenantId = tid(ctx);
   const range = f.from && f.to ? rangeFromDays(f.from, f.to) : undefined;
-  const employeeId = ctx.role === "EMPLOYEE" ? ctx.userId : f.employeeId;
+  const employeeId = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? f.employeeId : ctx.userId;
   return withTenant(ctx, (tx) => ledgerRows(tx, tenantId, { range, employeeId, limit: 1000 }));
 }
 
 export async function getSummary(ctx: Ctx, from: string, to: string, employeeId?: string) {
-  requireRole(ctx, "ADMIN", "EMPLOYEE");
+  requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
-  const only = ctx.role === "EMPLOYEE" ? ctx.userId : employeeId;
+  const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
   return withTenant(ctx, async (tx) => ({
     summary: await buildSummary(tx, tenantId, range, from, to, only),
     entries: await ledgerRows(tx, tenantId, { range, employeeId: only, limit: 2000 }),

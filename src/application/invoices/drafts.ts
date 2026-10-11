@@ -82,8 +82,10 @@ export async function createDraft(ctx: Ctx, input: z.infer<typeof invoiceDraftSc
   const tenantId = tid(ctx);
   return withTenant(ctx, async (tx) => {
     await assertContact(tx, tenantId, input.contactId);
+    const t = await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
     const [inv] = await tx.insert(invoices).values({
       tenantId, contactId: input.contactId, notes: input.notes,
+      paymentMethod: input.paymentMethod ?? t?.defaultPaymentMethod ?? "TRANSFER",
       serviceDate: input.serviceDate ? dateInputToDate(input.serviceDate) : null,
       dueDate: input.dueDate ? dateInputToDate(input.dueDate) : null,
     }).returning();
@@ -107,6 +109,7 @@ export async function updateDraft(ctx: Ctx, id: string, input: z.infer<typeof in
     if (input.notes !== undefined) patch.notes = input.notes;
     if (input.serviceDate !== undefined) patch.serviceDate = input.serviceDate ? dateInputToDate(input.serviceDate) : null;
     if (input.dueDate !== undefined) patch.dueDate = input.dueDate ? dateInputToDate(input.dueDate) : null;
+    if (input.paymentMethod !== undefined) patch.paymentMethod = input.paymentMethod;
     if (Object.keys(patch).length) await tx.update(invoices).set(patch).where(eq(invoices.id, id));
     if (input.items) await writeItems(tx, tenantId, id, input.items);
     return loadInvoiceFull(tx, tenantId, id);

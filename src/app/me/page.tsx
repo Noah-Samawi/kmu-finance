@@ -25,6 +25,7 @@ export default async function MePage() {
           { label: "Heute erhalten", cents: t?.allocatedCents ?? 0 },
           { label: "Heute belegt", cents: t?.receiptsCents ?? 0 },
           { label: "Monat belegt", cents: d.month?.receiptsCents ?? 0 },
+          { label: "Auslagen-Anspruch", cents: d.claimCents },
         ]}
       />
 

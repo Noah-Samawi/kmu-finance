@@ -6,6 +6,7 @@ import { PdfWriter, A4, MARGIN } from "@/infrastructure/pdf/pdf-kit";
 import { LEDGER_LABEL } from "@/domain/ledger";
 import { centsToPlain, formatCents } from "@/domain/money";
 import { fmtDate, fmtDateTime } from "@/domain/period";
+import { forbidden } from "@/domain/errors";
 import { requireRole, tid, type Ctx } from "../context";
 import { buildSummary, ledgerRows, rangeFromDays, type LedgerRow, type Summary } from "./reports";
 
@@ -21,10 +22,12 @@ export function toCsv(rows: LedgerRow[]): string {
     const safe = /^[=+\-@\t]/.test(s) && !/^-?\d/.test(s) ? `'${s}` : s;
     return /[;"]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
-  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Pool (EUR)", "Mitarbeiterkonto (EUR)"];
+  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Konto", "Kasse (EUR)", "Bank (EUR)", "Budget (EUR)", "Auslage-Anspruch (EUR)", "Kapital Partner (EUR)"];
   const lines = [...rows].reverse().map((r) => [
     fmtDateTime(r.bookingDate), r.id, typeLabel(r), r.employeeName ?? "", r.description ?? "",
-    r.receiptMerchant ?? "", r.invoiceNumber ?? "", centsToPlain(r.poolDeltaCents), centsToPlain(r.walletDeltaCents),
+    r.receiptMerchant ?? "", r.invoiceNumber ?? "", r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Kasse" : "",
+    centsToPlain(r.cashDeltaCents), centsToPlain(r.bankDeltaCents),
+    centsToPlain(r.walletDeltaCents), centsToPlain(r.claimDeltaCents), centsToPlain(r.partnerDeltaCents),
   ].map(esc).join(";"));
   return "﻿" + [header.join(";"), ...lines].join("\r\n") + "\r\n";
 }
@@ -37,11 +40,11 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
   w.hr();
 
   if (!employeeView) {
-    w.line("Kasse und Bankkonto", { size: 11, bold: true });
-    w.table(
+    w.line("Saldo-Übertrag (Anfangssaldo = Endsaldo der Vorperiode)", { size: 11, bold: true });
+    w.tableBoxed(
       [
         { title: "Konto", width: 220 },
-        { title: "Anfang", width: 155, align: "right" },
+        { title: "Übertrag / Anfang", width: 155, align: "right" },
         { title: "Ende", width: width - 375, align: "right" },
       ],
       [
@@ -64,37 +67,52 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
     w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
       ["Belegte Ausgaben", formatCents(s.totals.receiptsCents)],
       ["Manuelle Ausgleiche (ohne Beleg)", formatCents(s.totals.adjustmentsCents)],
-      ["Offene Mitarbeiter-Guthaben (Ende)", formatCents(s.totals.walletsOpenCents)],
+      ["Offene Mitarbeiter-Budgets (Ende)", formatCents(s.totals.walletsOpenCents)],
+      ["Offene Auslagen-Ansprüche (Ende)", formatCents(s.totals.claimsOpenCents)],
     ]);
     w.y -= 8;
   }
 
-  w.line(employeeView ? "Mein Konto" : "Mitarbeiterkonten", { size: 11, bold: true });
+  w.line(employeeView ? "Mein Konto" : "Mitarbeiterkonten (Budget und Auslagen)", { size: 11, bold: true });
   w.table(
     [
-      { title: "Mitarbeiter", width: 115 }, { title: "Anfang", width: 64, align: "right" },
-      { title: "Erhalten", width: 64, align: "right" }, { title: "Belege", width: 64, align: "right" },
-      { title: "Ausgleich", width: 64, align: "right" }, { title: "Zurück", width: 64, align: "right" },
-      { title: "Rest", width: width - 435, align: "right" },
+      { title: "Mitarbeiter", width: 90 }, { title: "Budget Anfang", width: 62, align: "right" },
+      { title: "Erhalten", width: 54, align: "right" }, { title: "Belege", width: 50, align: "right" },
+      { title: "Budget Ende", width: 62, align: "right" }, { title: "Anspruch", width: 62, align: "right" },
+      { title: "Saldo vs. Firma", width: width - 380, align: "right" },
     ],
     s.employees.map((e) => [e.name, formatCents(e.openingCents), formatCents(e.allocatedCents), formatCents(e.receiptsCents),
-      formatCents(e.adjustmentsCents), formatCents(e.returnedCents), formatCents(e.closingCents)]),
+      formatCents(e.closingCents), formatCents(e.claimClosingCents), formatCents(e.firmBalanceCents)]),
     8,
   );
+  if (s.partners?.length) {
+    w.y -= 8;
+    w.line("Gesellschafter-Kapitalkonten", { size: 11, bold: true });
+    w.table(
+      [
+        { title: "Gesellschafter", width: 140 }, { title: "Übertrag", width: 80, align: "right" },
+        { title: "Einlagen", width: 80, align: "right" }, { title: "Entnahmen", width: 80, align: "right" },
+        { title: "Gewinn", width: 70, align: "right" }, { title: "Ende", width: width - 450, align: "right" },
+      ],
+      s.partners.map((p) => [p.name, formatCents(p.openingCents), formatCents(p.depositCents), formatCents(p.drawCents), formatCents(p.profitCents), formatCents(p.closingCents)]),
+      8,
+    );
+  }
   w.y -= 8;
   w.line(`Einzelbuchungen (${rows.length})`, { size: 11, bold: true });
   w.table(
     [
-      { title: "Datum", width: 70 }, { title: "Art", width: 85 }, { title: "Mitarbeiter", width: 75 },
-      { title: "Beschreibung", width: 135 },
-      ...(employeeView ? [] : [{ title: "Pool", width: 65, align: "right" as const }]),
-      { title: "MA-Konto", width: employeeView ? width - 365 : width - 430, align: "right" },
+      { title: "Datum", width: 62 }, { title: "Art", width: 88 }, { title: "Person", width: 70 },
+      { title: "Konto", width: 40 }, { title: "Beschreibung", width: 120 },
+      { title: "Kasse", width: 52, align: "right" as const },
+      { title: "Bank", width: 52, align: "right" as const },
     ],
     [...rows].reverse().map((r) => [
       fmtDateTime(r.bookingDate), typeLabel(r), r.employeeName ?? "–",
+      r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Bar" : "",
       [r.description, r.invoiceNumber].filter(Boolean).join(" · "),
-      ...(employeeView ? [] : [r.poolDeltaCents ? formatCents(r.poolDeltaCents) : ""]),
-      r.walletDeltaCents ? formatCents(r.walletDeltaCents) : "",
+      r.cashDeltaCents ? formatCents(r.cashDeltaCents) : "",
+      r.bankDeltaCents ? formatCents(r.bankDeltaCents) : "",
     ]),
     8,
   );
@@ -103,10 +121,11 @@ export async function renderReportPdf(tenantName: string, s: Summary, rows: Ledg
 }
 
 export async function exportReport(ctx: Ctx, format: "csv" | "pdf", from: string, to: string, employeeId?: string) {
-  requireRole(ctx, "ADMIN", "EMPLOYEE");
+  requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
+  if (ctx.role === "PARTNER" && !ctx.canViewReports) throw forbidden("Kein Zugriff auf Berichte");
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
-  const only = ctx.role === "EMPLOYEE" ? ctx.userId : employeeId;
+  const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
   const { rows, summary, tenantName } = await withTenant(ctx, async (tx) => ({
     rows: await ledgerRows(tx, tenantId, { range, employeeId: only, limit: 100_000 }),
     summary: await buildSummary(tx, tenantId, range, from, to, only),

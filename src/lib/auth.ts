@@ -14,5 +14,8 @@ export async function requireUser(...roles: Role[]): Promise<AuthUser> {
 }
 
 export function homeFor(role: Role) {
-  return role === "SUPER_ADMIN" ? "/super/tenants" : role === "ADMIN" ? "/admin/dashboard" : "/me";
+  if (role === "SUPER_ADMIN") return "/super/tenants";
+  if (role === "ADMIN") return "/admin/dashboard";
+  if (role === "PARTNER") return "/partner";
+  return "/me";
 }

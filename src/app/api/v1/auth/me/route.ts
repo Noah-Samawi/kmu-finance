@@ -1,3 +1,3 @@
 import { route } from "@/lib/api";
 
-export const GET = route(["SUPER_ADMIN", "ADMIN", "EMPLOYEE"], async ({ ctx }) => ({ user: ctx }));
+export const GET = route(["SUPER_ADMIN", "ADMIN", "EMPLOYEE", "PARTNER"], async ({ ctx }) => ({ user: ctx }));

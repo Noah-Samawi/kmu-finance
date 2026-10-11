@@ -17,7 +17,7 @@ export function VatSelect({
     <select
       name={name}
       disabled={disabled}
-      className={className ?? inputCls}
+      className={className ?? `${inputCls} min-w-[8rem]`}
       {...extra}
       onChange={onChange ? (e) => onChange(Number(e.target.value)) : undefined}
     >

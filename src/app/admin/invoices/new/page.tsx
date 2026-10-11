@@ -24,7 +24,10 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
         <InvoiceEditor
           contacts={contacts.map((c) => ({ id: c.id, name: c.name }))}
           smallBusiness={tenant.smallBusiness}
-          initial={sp.contactId ? { contactId: sp.contactId, serviceDate: "", dueDate: "", notes: "", items: [] } : undefined}
+          initial={{
+            contactId: sp.contactId ?? "", serviceDate: "", dueDate: "", notes: "", items: [],
+            paymentMethod: tenant.defaultPaymentMethod,
+          }}
         />
       )}
     </>

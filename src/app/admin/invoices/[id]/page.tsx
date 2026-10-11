@@ -32,6 +32,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             serviceDate: inv.serviceDate ? todayKey(inv.serviceDate) : "",
             dueDate: inv.dueDate ? todayKey(inv.dueDate) : "",
             items: inv.items,
+            paymentMethod: inv.paymentMethod,
           }}
         />
       </>

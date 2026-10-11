@@ -8,7 +8,7 @@ import { DIRECTLY_REVERSIBLE, LEDGER_LABEL, deltasFor, reversalDeltas } from "@/
 import { ACCOUNT_LABEL } from "@/domain/accounts";
 import { adjustSchema, cashExpenseSchema, resetBudgetSchema, returnSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
-import { audit, cashBalance, bankBalance, insertEntry, insufficient, loadEmployee, poolBalance, walletBalance } from "../ledger-service";
+import { audit, cashBalance, bankBalance, claimBalance, insertEntry, insufficient, loadEmployee, partnerBalance, poolBalance, walletBalance } from "../ledger-service";
 import { dateInputToDate, todayKey } from "@/domain/period";
 
 /**
@@ -90,6 +90,10 @@ export async function reverseEntry(ctx: Ctx, entryId: string, reason: string) {
     if (orig.employeeId) {
       const w = await walletBalance(tx, tenantId, orig.employeeId);
       if (w + d.walletDeltaCents < 0) throw insufficient("Guthaben des Mitarbeiters", w);
+      const c = await claimBalance(tx, tenantId, orig.employeeId);
+      if (c + (d.claimDeltaCents ?? 0) < 0) throw insufficient("Auslagen-Anspruch", c);
+      const p = await partnerBalance(tx, tenantId, orig.employeeId);
+      if (p + (d.partnerDeltaCents ?? 0) < 0) throw insufficient("Kapitalkonto", p);
     }
     const entry = await insertEntry(tx, ctx, tenantId, {
       type: "REVERSAL", ...d, employeeId: orig.employeeId, reversalOfId: orig.id,

@@ -32,8 +32,10 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           <Section>
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <p className="text-sm text-muted">Aktuelles Guthaben</p>
+                <p className="text-sm text-muted">Firmenbudget beim Mitarbeiter</p>
                 <p className="text-4xl font-semibold tracking-tight tabular">{formatCents(emp.balanceCents)}</p>
+                <p className="mt-2 text-sm">Auslagen-Anspruch: <span className="font-semibold tabular">{formatCents(emp.claimCents)}</span>
+                  {" · "}Saldo vs. Firma: <span className="font-semibold tabular">{formatCents(emp.firmBalanceCents)}</span> <span className="text-muted">(plus = Firma schuldet MA)</span></p>
               </div>
               {m && (
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm tabular sm:grid-cols-4">
@@ -46,7 +48,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             </div>
             <p className="mt-1 text-xs text-muted">Kennzahlen für den laufenden Monat</p>
             <div className="mt-5 border-t border-line pt-4">
-              <WalletActions id={emp.id} balanceCents={emp.balanceCents} isActive={emp.isActive} canEnterCashExpense={emp.canEnterCashExpense} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
+              <WalletActions id={emp.id} balanceCents={emp.balanceCents} isActive={emp.isActive} canEnterCashExpense={emp.canEnterCashExpense} canEnterOutlay={emp.canEnterOutlay} claimCents={emp.claimCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
             </div>
           </Section>
           <Section title="Kontobewegungen diesen Monat" flush>

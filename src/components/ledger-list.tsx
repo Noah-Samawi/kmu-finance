@@ -54,9 +54,24 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds }: {
             )}
             {(mode === "wallet" || mode === "both") && r.walletDeltaCents !== 0 && (
               <span className="text-sm">
-                {mode === "both" && <span className="mr-1 text-xs text-muted">Konto</span>}
+                {mode === "both" && <span className="mr-1 text-xs text-muted">Budget</span>}
                 <Money cents={r.walletDeltaCents} signed className="font-semibold" />
               </span>
+            )}
+            {r.claimDeltaCents !== 0 && (
+              <span className="text-sm">
+                <span className="mr-1 text-xs text-muted">Auslage</span>
+                <Money cents={r.claimDeltaCents} signed className="font-semibold" />
+              </span>
+            )}
+            {r.partnerDeltaCents !== 0 && (
+              <span className="text-sm">
+                <span className="mr-1 text-xs text-muted">Kapital</span>
+                <Money cents={r.partnerDeltaCents} signed className="font-semibold" />
+              </span>
+            )}
+            {(r.accountKind === "CASH" || r.accountKind === "BANK") && (r.cashDeltaCents !== 0 || r.bankDeltaCents !== 0) && (
+              <span className="text-xs text-muted">{r.accountKind === "BANK" ? "Bankkonto" : "Kasse Bar"}</span>
             )}
             {admin && DIRECTLY_REVERSIBLE.includes(r.type) && !reversed.has(r.id) && !r.closingId && <ReverseButton id={r.id} />}
           </div>

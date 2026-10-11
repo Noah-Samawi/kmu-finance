@@ -55,11 +55,12 @@ export function ResetBudgetButton({ id, balanceCents }: { id: string; balanceCen
 }
 
 /** Ausgleich, Rückführung, Sperren, Passwort */
-export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense, cashCents, bankCents }: {
-  id: string; balanceCents: number; isActive: boolean; canEnterCashExpense?: boolean; cashCents?: number; bankCents?: number;
+export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense, canEnterOutlay, claimCents, cashCents, bankCents }: {
+  id: string; balanceCents: number; isActive: boolean; canEnterCashExpense?: boolean; canEnterOutlay?: boolean;
+  claimCents?: number; cashCents?: number; bankCents?: number;
 }) {
   const { call, busy, error } = useApi();
-  const [mode, setMode] = useState<null | "adjust" | "return" | "password">(null);
+  const [mode, setMode] = useState<null | "adjust" | "return" | "password" | "repay">(null);
   const toggle = (m: typeof mode) => setMode(mode === m ? null : m);
 
   return (
@@ -68,6 +69,7 @@ export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense,
       <div className="flex flex-wrap gap-2">
         <button className={cx(btn.base, btn.secondary, btn.sm)} disabled={balanceCents <= 0} onClick={() => toggle("adjust")}>Ausgleich buchen</button>
         <button className={cx(btn.base, btn.secondary, btn.sm)} disabled={balanceCents <= 0} onClick={() => toggle("return")}>Restgeld zurücknehmen</button>
+        <button className={cx(btn.base, btn.primary, btn.sm)} disabled={!claimCents || claimCents <= 0} onClick={() => toggle("repay")}>Auslage erstatten</button>
         <button className={cx(btn.base, btn.secondary, btn.sm)} onClick={() => toggle("password")}>Passwort zurücksetzen</button>
         <button disabled={busy} className={cx(btn.base, btn.sm, isActive ? btn.danger : btn.primary)}
           onClick={() => {
@@ -79,6 +81,10 @@ export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense,
         <button disabled={busy} className={cx(btn.base, btn.secondary, btn.sm)}
           onClick={() => call("PATCH", `/api/v1/employees/${id}`, { canEnterCashExpense: !canEnterCashExpense })}>
           {canEnterCashExpense ? "Barausgabe durch MA sperren" : "Barausgabe durch MA erlauben"}
+        </button>
+        <button disabled={busy} className={cx(btn.base, btn.secondary, btn.sm)}
+          onClick={() => call("PATCH", `/api/v1/employees/${id}`, { canEnterOutlay: !canEnterOutlay })}>
+          {canEnterOutlay ? "Auslagen durch MA sperren" : "Auslagen durch MA erlauben"}
         </button>
       </div>
 
@@ -117,6 +123,26 @@ export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense,
           <Field label="Betrag" hint="Leer lassen = gesamtes Guthaben"><input name="amount" inputMode="decimal" placeholder={formatCents(balanceCents)} className={cx(inputCls, "text-right")} /></Field>
           <Field label="Wofür? (Pflicht)"><input name="description" required minLength={3} className={inputCls} dir="auto" /></Field>
           <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Rückgabe buchen</button>
+        </form>
+      )}
+      {mode === "repay" && (
+        <form className="space-y-3 rounded-lg border border-line bg-paper p-3" onSubmit={async (e) => {
+          e.preventDefault();
+          const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+          if (await call("POST", `/api/v1/employees/${id}/outlay-repay`, {
+            amountCents: f.amount || undefined, all: !f.amount, accountKind: f.accountKind, description: f.description,
+          })) setMode(null);
+        }}>
+          <p className="text-sm text-muted">Offener Anspruch: {formatCents(claimCents ?? 0)}. Zahlung aus Kasse oder Bankkonto, sobald Einnahmen da sind.</p>
+          <Field label="Auszahlungskonto">
+            <select name="accountKind" className={inputCls} defaultValue="CASH">
+              <option value="CASH">Kasse (Bar){cashCents != null ? ` · ${formatCents(cashCents)}` : ""}</option>
+              <option value="BANK">Bankkonto{bankCents != null ? ` · ${formatCents(bankCents)}` : ""}</option>
+            </select>
+          </Field>
+          <Field label="Betrag" hint="Leer = gesamter Anspruch"><input name="amount" inputMode="decimal" className={cx(inputCls, "text-right")} /></Field>
+          <Field label="Wofür? (Pflicht)"><input name="description" required minLength={3} className={inputCls} dir="auto" /></Field>
+          <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Erstattung buchen</button>
         </form>
       )}
       {mode === "password" && (
