@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  categoryLabel, correctionDiff, correctionText, dailyIncomeParts, duplicateWarning, expenseDeltas,
+  accountFlow, accountFlowLines, categoryLabel, correctionDiff, correctionText, dailyIncomeParts,
+  duplicateWarning, duplicateWarnings, entryLabel, expenseDeltas,
 } from "@/domain/cash";
 import { deltasFor, DIRECTLY_REVERSIBLE } from "@/domain/ledger";
 import { allowedSources, partnerPosting } from "@/domain/partner";
@@ -31,9 +32,31 @@ describe("Kasse & Bank – Tageseinnahme", () => {
     expect(() => dailyIncomeParts(-100, 0)).toThrow(/positiv/);
   });
 
-  it("Dubletten-Hinweis nur, wenn schon eine Einnahme existiert", () => {
-    expect(duplicateWarning(0)).toBeNull();
-    expect(duplicateWarning(1)).toBe("Achtung: Für dieses Datum existiert bereits eine Einnahmebuchung!");
+  it("Dubletten-Hinweis je Konto mit Datum", () => {
+    const d = new Date("2026-10-18T10:00:00Z");
+    expect(duplicateWarning("CASH", d, 0)).toBeNull();
+    expect(duplicateWarning("CASH", d, 1)).toBe("Achtung: Für das Datum 18.10.2026 wurden bereits Kassen-Einnahmen erfasst!");
+    expect(duplicateWarning("BANK", d, 2)).toBe("Achtung: Für das Datum 18.10.2026 wurden bereits Bank-Einnahmen erfasst!");
+  });
+
+  it("1× Kasse + 1× Bank am selben Tag: NIE eine Warnung", () => {
+    const d = new Date("2026-10-18T10:00:00Z");
+    // erste Erfassung beider Konten
+    expect(duplicateWarnings(d, { CASH: 0, BANK: 0 }, { cash: true, bank: true })).toEqual([]);
+    // Kasse schon gebucht, jetzt nur Bank nachgetragen
+    expect(duplicateWarnings(d, { CASH: 1, BANK: 0 }, { cash: false, bank: true })).toEqual([]);
+    // Bank schon gebucht, jetzt nur Kasse
+    expect(duplicateWarnings(d, { CASH: 0, BANK: 1 }, { cash: true, bank: false })).toEqual([]);
+  });
+
+  it("2× Kasse oder 2× Bank: Warnung nur für das betroffene Konto", () => {
+    const d = new Date("2026-10-18T10:00:00Z");
+    expect(duplicateWarnings(d, { CASH: 1, BANK: 1 }, { cash: true, bank: false }))
+      .toEqual(["Achtung: Für das Datum 18.10.2026 wurden bereits Kassen-Einnahmen erfasst!"]);
+    expect(duplicateWarnings(d, { CASH: 1, BANK: 1 }, { cash: false, bank: true }))
+      .toEqual(["Achtung: Für das Datum 18.10.2026 wurden bereits Bank-Einnahmen erfasst!"]);
+    expect(duplicateWarnings(d, { CASH: 1, BANK: 0 }, { cash: true, bank: true }))
+      .toEqual(["Achtung: Für das Datum 18.10.2026 wurden bereits Kassen-Einnahmen erfasst!"]);
   });
 
   it("Schema: leere Felder sind kein Betrag, Euro-Eingabe wird zu Cent", () => {
@@ -120,13 +143,79 @@ describe("Gesellschafter: Einkauf für die Firma", () => {
     const b = r.accounts.find((a) => a.key === "BUDGET")!;
     expect(b.closingCents).toBe(30_000);
     expect(b.lines.find((l) => l.label === "− Einkäufe für die Firma (aus Budget)")?.cents).toBe(-20_000);
-    expect(r.transfers.map((t) => [t.direction, t.directionLabel, t.accountLabel, t.amountCents])).toEqual([
-      ["COMPANY_INCOME", "Einnahme über Ali → Firmenkonto", "Kasse (Bar)", 85_000],
-      ["COMPANY_EXPENSE", "Firmenmittel, ausgegeben von Ali", "Bankkonto", 4_990],
+    expect(r.transfers.map((t) => [t.direction, t.kind, t.accountLabel, t.deltaCents])).toEqual([
+      ["COMPANY_INCOME", "Tageseinnahme Kasse (Bar)", "Kasse (Bar)", 85_000],
+      ["COMPANY_EXPENSE", "Ausgabe Bankkonto", "Bankkonto", -4_990],
     ]);
     const s = r.statements.join(" ");
     expect(s).toMatch(/Restguthaben 300,00\s€ verbleibt bei Ali/);
-    expect(s).toMatch(/Über Ali vereinnahmt: 850,00\s€/);
-    expect(s).toMatch(/Ali hat 49,90\s€ Firmenmittel/);
+    expect(s).toMatch(/Über Ali vereinnahmt: Kasse \(Bar\) 850,00\s€ – jeweils direkt/);
+    expect(s).toMatch(/Von Ali für die Firma ausgegeben \(Firmenmittel\): Bankkonto 49,90\s€\./);
+  });
+});
+
+describe("Strikte Trennung Kasse (Bar) / Bankkonto", () => {
+  const rows = [
+    { type: "INCOME_MANUAL", cashDeltaCents: 85_050, bankDeltaCents: 0 },
+    { type: "INCOME_MANUAL", cashDeltaCents: 0, bankDeltaCents: 120_000 },
+    { type: "INCOME_INVOICE", cashDeltaCents: 0, bankDeltaCents: 50_000 },
+    { type: "EXPENSE", cashDeltaCents: -4_990, bankDeltaCents: 0 },
+    { type: "EXPENSE", cashDeltaCents: 0, bankDeltaCents: -30_000 },
+    { type: "ALLOCATION", cashDeltaCents: -10_000, bankDeltaCents: 0 },
+    { type: "RETURN", cashDeltaCents: 2_000, bankDeltaCents: 0 },
+    { type: "CASH_WITHDRAWAL", cashDeltaCents: 20_000, bankDeltaCents: -20_000 },
+    { type: "ACCOUNT_ADJUST", cashDeltaCents: -1_000, bankDeltaCents: 0 },
+    { type: "PARTNER_DEPOSIT", cashDeltaCents: 0, bankDeltaCents: 600_000 },
+  ];
+
+  it("Kasse enthält nur Kassenbewegungen – Einnahmen erhöhen, Ausgaben mindern", () => {
+    expect(accountFlow("CASH", 10_000, rows)).toEqual({
+      openingCents: 10_000, dailyIncomeCents: 85_050, invoiceIncomeCents: 0, expenseCents: 4_990,
+      allocatedCents: 10_000, returnedCents: 2_000, transferCents: 20_000, correctionCents: -1_000, otherCents: 0,
+      closingCents: 10_000 + 85_050 - 4_990 - 10_000 + 2_000 + 20_000 - 1_000,
+    });
+  });
+
+  it("Bank enthält nur Bankbewegungen – nie mit der Kasse zusammengerechnet", () => {
+    expect(accountFlow("BANK", 0, rows)).toEqual({
+      openingCents: 0, dailyIncomeCents: 120_000, invoiceIncomeCents: 50_000, expenseCents: 30_000,
+      allocatedCents: 0, returnedCents: 0, transferCents: -20_000, correctionCents: 0, otherCents: 600_000,
+      closingCents: 120_000 + 50_000 - 30_000 - 20_000 + 600_000,
+    });
+  });
+
+  it("Einnahmen zählen nie als Ausgabe – auch nicht nach Storno einer Ausgabe", () => {
+    const f = accountFlow("CASH", 0, [
+      { type: "INCOME_MANUAL", cashDeltaCents: 5_000, bankDeltaCents: 0 },
+      { type: "EXPENSE", cashDeltaCents: -1_000, bankDeltaCents: 0 },
+      { type: "EXPENSE", cashDeltaCents: 1_000, bankDeltaCents: 0 }, // Storno der Ausgabe
+    ]);
+    expect([f.dailyIncomeCents, f.expenseCents, f.closingCents]).toEqual([5_000, 0, 5_000]);
+  });
+
+  it("Berichtszeilen tragen den Kontonamen und gehen exakt auf", () => {
+    const f = accountFlow("BANK", 0, rows);
+    const lines = accountFlowLines("BANK", f);
+    expect(lines.map((l) => l.label)).toEqual([
+      "Anfangsbestand (Übertrag)", "+ Tageseinnahmen Bankkonto", "+ Zahlungseingänge aus Rechnungen",
+      "− Ausgaben Bankkonto", "− Budget an Personen", "+ Rückgaben von Personen",
+      "± Umbuchung in die Kasse (Abhebung)", "± Gesellschafter & Erstattungen", "= Endbestand Bankkonto",
+    ]);
+    const signed = lines.slice(0, -1).reduce((s, l) => s + (l.label.startsWith("−") ? -l.cents : l.cents), 0);
+    expect(signed).toBe(lines.at(-1)!.cents);
+  });
+
+  it("Buchungstexte nennen das Konto", () => {
+    expect(entryLabel("INCOME_MANUAL", "Einnahme (manuell)", { accountKind: "CASH" })).toBe("Tageseinnahme Kasse (Bar)");
+    expect(entryLabel("INCOME_MANUAL", "Einnahme (manuell)", { accountKind: "BANK" })).toBe("Tageseinnahme Bankkonto");
+    expect(entryLabel("EXPENSE", "Betriebsausgabe", { accountKind: "CASH" })).toBe("Ausgabe Kasse (Bar)");
+    expect(entryLabel("EXPENSE", "Betriebsausgabe", { accountKind: "BANK" })).toBe("Ausgabe Bankkonto");
+    expect(entryLabel("EXPENSE", "Betriebsausgabe", { accountKind: null, partnerDeltaCents: -1 })).toBe("Einkauf vom Kapitalkonto");
+  });
+
+  it("Tageseinnahme Kasse + Bank ergibt zwei getrennte Einnahmebuchungen", () => {
+    const parts = dailyIncomeParts(85_050, 120_000);
+    const d = parts.map((p) => deltasFor("INCOME_MANUAL", p.amountCents, p.account));
+    expect(d.map((x) => [x.accountKind, x.cashDeltaCents, x.bankDeltaCents])).toEqual([["CASH", 85_050, 0], ["BANK", 0, 120_000]]);
   });
 });

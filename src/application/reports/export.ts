@@ -4,7 +4,8 @@ import type { Tx } from "@/infrastructure/db/client";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
 import { tenants, users } from "@/infrastructure/db/schema";
 import { PdfWriter, A4, MARGIN } from "@/infrastructure/pdf/pdf-kit";
-import { categoryLabel } from "@/domain/cash";
+import { ACCOUNT_LABEL } from "@/domain/accounts";
+import { accountFlowLines, categoryLabel, entryLabel } from "@/domain/cash";
 import { LEDGER_LABEL } from "@/domain/ledger";
 import { centsToPlain, formatCents } from "@/domain/money";
 import { fmtDate, fmtDateTime } from "@/domain/period";
@@ -19,7 +20,9 @@ import { buildPersonReportTx, drawPersonReport, partnerStatusText, type FullPers
 export { partnerBookingTableRows, partnerStatusText } from "./person-report";
 
 function typeLabel(r: LedgerRow) {
-  return r.type === "REVERSAL" && r.reversedType ? `Storno ${LEDGER_LABEL[r.reversedType]}` : LEDGER_LABEL[r.type];
+  return r.type === "REVERSAL" && r.reversedType
+    ? `Storno ${entryLabel(r.reversedType, LEDGER_LABEL[r.reversedType], r)}`
+    : entryLabel(r.type, LEDGER_LABEL[r.type], r);
 }
 
 /** CSV im Excel-freundlichen deutschen Format: Semikolon, Dezimalkomma, UTF-8 mit BOM */
@@ -30,7 +33,7 @@ export function toCsv(rows: LedgerRow[], partnerBookings: PartnerBookingRow[] = 
     const safe = /^[=+\-@\t]/.test(s) && !/^-?\d/.test(s) ? `'${s}` : s;
     return /[;"]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
-  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Konto", "Kasse (EUR)", "Bank (EUR)", "Budget (EUR)", "Auslage-Anspruch (EUR)", "Kapital Partner (EUR)", "Kategorie", "Bewegung (Kasse+Bank)"];
+  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Konto", "Kasse (EUR)", "Bank (EUR)", "Budget (EUR)", "Auslage-Anspruch (EUR)", "Kapital Partner (EUR)", "Kategorie", "Gemeinsame Erfassung (ID)"];
   const lines = [...rows].reverse().map((r) => [
     fmtDateTime(r.bookingDate), r.id, typeLabel(r), r.employeeName ?? "", r.description ?? "",
     r.receiptMerchant ?? "", r.invoiceNumber ?? "", r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Kasse" : "",
@@ -67,33 +70,16 @@ export async function renderReportPdf(
     return w.save();
   }
   {
-    w.line("Saldo-Übertrag (Anfangssaldo = Endsaldo der Vorperiode)", { size: 11, bold: true });
-    w.tableOpen(
-      [
-        { title: "Konto", width: 220 },
-        { title: "Übertrag / Anfang", width: 155, align: "right" },
-        { title: "Ende", width: width - 375, align: "right" },
-      ],
-      [
-        ["Kasse (Bar)", formatCents(s.cash.openingCents), formatCents(s.cash.closingCents)],
-        ["Bankkonto", formatCents(s.bank.openingCents), formatCents(s.bank.closingCents)],
-      ],
-    );
-    w.y -= 18;
-    w.line("Einnahmen-Pool (Summe)", { size: 11, bold: true });
-    w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
-      ["Anfangsbestand", formatCents(s.pool.openingCents)],
-      ["+ Einnahmen aus Rechnungen", formatCents(s.pool.incomeInvoiceCents)],
-      ["+ Manuelle Einnahmen", formatCents(s.pool.incomeManualCents)],
-      ["– Budget-Zuteilungen (Mitarbeiter und Gesellschafter)", formatCents(s.pool.allocatedCents)],
-      ["+ Budget-Rückführungen", formatCents(s.pool.returnedCents)],
-      ["– Betriebsausgaben (Kasse/Bank)", formatCents(s.pool.expenseCents)],
-      ["± Korrekturen, Gesellschafter, Erstattungen", formatCents(s.pool.otherCents)],
-      ["= Rest-Kassenbestand (Ende)", formatCents(s.pool.closingCents)],
-    ]);
-    w.y -= 8;
+    for (const [account, flow] of [["CASH", s.cash], ["BANK", s.bank]] as const) {
+      w.line(`${ACCOUNT_LABEL[account]} – eigenes Konto (Anfangssaldo = Endsaldo der Vorperiode)`, { size: 11, bold: true });
+      w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }],
+        accountFlowLines(account, flow).map((l) => [l.label, formatCents(l.cents)]));
+      w.y -= 8;
+    }
     w.line("Ausgaben", { size: 11, bold: true });
     w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
+      ["Ausgaben Kasse (Bar)", formatCents(s.cash.expenseCents)],
+      ["Ausgaben Bankkonto", formatCents(s.bank.expenseCents)],
       ["Belegte Ausgaben", formatCents(s.totals.receiptsCents)],
       ["Manuelle Ausgleiche (ohne Beleg)", formatCents(s.totals.adjustmentsCents)],
       ...s.totals.expensesByCategory.map((c) => [`Betriebsausgabe: ${c.label}`, formatCents(c.cents)]),

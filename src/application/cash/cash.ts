@@ -12,7 +12,7 @@ import { ACCOUNT_LABEL } from "@/domain/accounts";
 import { deltasFor } from "@/domain/ledger";
 import { assertPurpose } from "@/domain/partner";
 import {
-  FUND_LABEL, categoryLabel, correctionDiff, correctionText, dailyIncomeParts, duplicateWarning, expenseDeltas,
+  FUND_LABEL, categoryLabel, correctionDiff, correctionText, dailyIncomeParts, duplicateWarning, duplicateWarnings, expenseDeltas,
 } from "@/domain/cash";
 import { dateInputToDate, dayRange, todayKey } from "@/domain/period";
 import { balanceCorrectionSchema, dailyIncomeSchema, expenseSchema } from "@/lib/validation/schemas";
@@ -69,14 +69,28 @@ async function incomesOn(tx: Tx, tenantId: string, day: string): Promise<DayInco
     .orderBy(asc(ledgerEntries.bookingDate));
 }
 
-/** Dubletten-Hinweis: gibt es für den Tag schon (nicht stornierte) manuelle Einnahmen? */
+const countOn = (rows: DayIncome[]) => ({
+  CASH: rows.filter((r) => r.accountKind === "CASH").length,
+  BANK: rows.filter((r) => r.accountKind === "BANK").length,
+});
+
+/**
+ * Bereits gebuchte Tageseinnahmen getrennt je Konto. Die Warnung gilt nur für das jeweilige Konto:
+ * cashWarning erscheint, wenn erneut Kasse gebucht wird – bankWarning entsprechend für die Bank.
+ */
 export async function dayIncomes(ctx: Ctx, day: string) {
   requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);
   const rows = await withTenant(ctx, (tx) => incomesOn(tx, tenantId, day));
-  const cashCents = rows.filter((r) => r.accountKind !== "BANK").reduce((s, r) => s + r.poolDeltaCents, 0);
-  const bankCents = rows.filter((r) => r.accountKind === "BANK").reduce((s, r) => s + r.poolDeltaCents, 0);
-  return { date: day, count: rows.length, cashCents, bankCents, warning: duplicateWarning(rows.length), entries: rows };
+  const n = countOn(rows);
+  const date = dateInputToDate(day);
+  const sumOf = (a: "CASH" | "BANK") => rows.filter((r) => r.accountKind === a).reduce((s, r) => s + r.poolDeltaCents, 0);
+  return {
+    date: day,
+    cash: { count: n.CASH, cents: sumOf("CASH"), warning: duplicateWarning("CASH", date, n.CASH) },
+    bank: { count: n.BANK, cents: sumOf("BANK"), warning: duplicateWarning("BANK", date, n.BANK) },
+    entries: rows,
+  };
 }
 
 /** Buchbestand eines Kontos am Ende des Stichtags (inkl. aller Buchungen dieses Tages) */
@@ -100,7 +114,7 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
   return withTenant(ctx, async (tx) => {
     await lockTenantLedger(tx, tenantId);
     const person = input.personId ? await loadPerson(tx, tenantId, input.personId) : null;
-    const before = await incomesOn(tx, tenantId, input.bookingDate);
+    const existing = countOn(await incomesOn(tx, tenantId, input.bookingDate));
     const batchId = parts.length > 1 ? randomUUID() : null;
     const bookingDate = bookingDateFor(input.bookingDate);
     const entries = [];
@@ -113,11 +127,14 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
     }
     await audit(tx, ctx, "cash.daily-income", "LedgerEntry", entries[0].id, {
       batchId, date: input.bookingDate, cashCents: input.cashCents ?? 0, bankCents: input.bankCents ?? 0,
-      personId: person?.id ?? null, existingIncomes: before.length,
+      personId: person?.id ?? null, existingCash: existing.CASH, existingBank: existing.BANK,
     });
+    const booked = (a: "CASH" | "BANK") => parts.find((p) => p.account === a)?.amountCents ?? 0;
     return {
-      entries, batchId, totalCents: parts.reduce((s, p) => s + p.amountCents, 0),
-      warning: duplicateWarning(before.length),
+      entries, batchId, cashCents: booked("CASH"), bankCents: booked("BANK"),
+      warnings: duplicateWarnings(dateInputToDate(input.bookingDate), existing, {
+        cash: booked("CASH") > 0, bank: booked("BANK") > 0,
+      }),
       cashBalanceCents: await cashBalance(tx, tenantId),
       bankBalanceCents: await bankBalance(tx, tenantId),
     };

@@ -126,10 +126,10 @@ export function drawPersonReport(w: PdfWriter, r: FullPersonReport, opts: { newP
     w.tableOpen(
       [
         { title: "Datum", width: 52 }, { title: "Richtung", width: 92 }, { title: "Konto", width: 62 },
-        { title: "Betrag", width: 62, align: "right" }, { title: "Vorgang", width: 80 }, { title: "Verwendungszweck", width: width - 348 },
+        { title: "Firmenkonto ±", width: 62, align: "right" }, { title: "Vorgang", width: 80 }, { title: "Verwendungszweck", width: width - 348 },
       ],
       r.transfers.map((t) => [
-        fmtDate(t.date), t.directionLabel, t.accountLabel, formatCents(t.amountCents),
+        fmtDate(t.date), t.directionLabel, t.accountLabel, `${t.deltaCents > 0 ? "+" : ""}${formatCents(t.deltaCents)}`,
         `${t.kind}${t.reversed ? " (storniert)" : ""}`, t.purpose,
       ]),
       7.5,

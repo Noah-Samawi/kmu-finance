@@ -25,17 +25,22 @@ export default async function DashboardPage() {
       />
 
       {/* Kassengleichung: das Herzstück der Übersicht */}
-      <section className="mb-6 rounded-xl border border-line bg-surface p-5 md:p-6">
-        <p className="text-sm font-medium text-muted">Freie Mittel (Kasse + Bank)</p>
-        <p className="mt-1 text-4xl font-semibold tracking-tight tabular md:text-5xl">{formatCents(d.poolBalanceCents)}</p>
-        <p className="mt-1 text-sm text-muted">Kasse {formatCents(d.cashBalanceCents)} · Bank {formatCents(d.bankBalanceCents)}</p>
-        <p className="mt-2 max-w-2xl text-muted">
-          Im {monthName}: <Money cents={d.month.incomeCents} signed /> eingenommen,{" "}
-          <Money cents={-d.month.allocatedCents} signed /> als Budget verteilt.
-          Mitarbeiter haben {formatCents(d.month.receiptsCents)} mit Beleg ausgegeben
-          {d.month.adjustmentsCents > 0 && <> und {formatCents(d.month.adjustmentsCents)} ohne Beleg ausgeglichen</>}.
-        </p>
-      </section>
+      <div className="mb-3 grid gap-3 sm:grid-cols-2">
+        {([["Kasse (Bar)", d.cashBalanceCents, d.month.cash], ["Bankkonto", d.bankBalanceCents, d.month.bank]] as const).map(([title, now, m]) => (
+          <section key={title} className="rounded-xl border border-line bg-surface p-5 md:p-6">
+            <p className="text-sm font-medium text-muted">{title}</p>
+            <p className="mt-1 text-4xl font-semibold tracking-tight tabular">{formatCents(now)}</p>
+            <p className="mt-2 text-sm text-muted">
+              {`Im ${monthName}: Tageseinnahmen ${formatCents(m.dailyIncomeCents)} · Rechnungseingänge ${formatCents(m.invoiceIncomeCents)} · Ausgaben ${formatCents(m.expenseCents)}`}
+            </p>
+          </section>
+        ))}
+      </div>
+      <p className="mb-6 max-w-3xl text-muted">
+        Im {monthName}: <Money cents={-d.month.allocatedCents} signed /> als Budget verteilt.
+        Mitarbeiter haben {formatCents(d.month.receiptsCents)} mit Beleg ausgegeben
+        {d.month.adjustmentsCents > 0 && <> und {formatCents(d.month.adjustmentsCents)} ohne Beleg ausgeglichen</>}.
+      </p>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
         <Link href="/admin/invoices?status=OPEN" className="rounded-xl border border-line bg-surface p-4 hover:border-ink/30">

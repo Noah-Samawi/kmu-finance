@@ -3,7 +3,7 @@ import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lt } from "driz
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { invoices, ledgerAttachments, ledgerEntries, periodClosings, receipts, users, type LedgerType } from "@/infrastructure/db/schema";
-import { categoryLabel } from "@/domain/cash";
+import { accountFlow, categoryLabel, type AccountFlow } from "@/domain/cash";
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "../context";
@@ -99,8 +99,9 @@ export interface Summary {
     otherCents: number;
     closingCents: number;
   };
-  cash: { openingCents: number; closingCents: number };
-  bank: { openingCents: number; closingCents: number };
+  /** Kasse (Bar) und Bankkonto strikt getrennt – jede Zeile nur mit Bewegungen dieses Kontos */
+  cash: AccountFlow;
+  bank: AccountFlow;
   carryForward: { cashCents: number; bankCents: number; poolCents: number };
   totals: {
     receiptsCents: number; adjustmentsCents: number; walletsOpenCents: number; claimsOpenCents: number;
@@ -219,13 +220,12 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
   const expensesByCategory = [...byCat].filter(([, c]) => c !== 0)
     .map(([category, cents]) => ({ category, label: categoryLabel(category), cents }))
     .sort((a, b) => b.cents - a.cents);
-  const cashMove = rows.reduce((s, r) => s + r.cashDeltaCents, 0);
-  const bankMove = rows.reduce((s, r) => s + r.bankDeltaCents, 0);
+  const flowRows = onlyEmployeeId ? [] : rows.map((r) => ({ ...r, type: effType(r) }));
 
   return {
     from: fromKey, to: toKey, pool,
-    cash: { openingCents: cashOpening, closingCents: cashOpening + cashMove },
-    bank: { openingCents: bankOpening, closingCents: bankOpening + bankMove },
+    cash: accountFlow("CASH", cashOpening, flowRows),
+    bank: accountFlow("BANK", bankOpening, flowRows),
     carryForward: { cashCents: cashOpening, bankCents: bankOpening, poolCents: poolOpening },
     totals: {
       receiptsCents: employees.reduce((s, e) => s + e.receiptsCents, 0),

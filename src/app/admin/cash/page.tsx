@@ -6,6 +6,7 @@ import { listPersons } from "@/application/cash/cash";
 import { getSummary } from "@/application/reports/reports";
 import { PageHeader, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
+import { AccountFlowList } from "@/components/account-flow";
 import { BalanceCorrectionForm, DailyIncomeForm, ExpenseForm } from "@/components/cash-forms";
 import { formatCents } from "@/domain/money";
 import { monthKey, todayKey } from "@/domain/period";
@@ -16,36 +17,44 @@ export const metadata: Metadata = { title: "Kasse & Bank" };
 export default async function CashPage() {
   const user = await requireUser("ADMIN");
   const today = todayKey();
-  const [pool, employees, persons, month] = await Promise.all([
-    poolOverview(user), listEmployees(user), listPersons(user), getSummary(user, `${monthKey()}-01`, today),
+  const [pool, employees, persons, month, day] = await Promise.all([
+    poolOverview(user), listEmployees(user), listPersons(user),
+    getSummary(user, `${monthKey()}-01`, today), getSummary(user, today, today),
   ]);
-  const p = month.summary.pool;
   const cats = month.summary.totals.expensesByCategory;
   const active = employees.filter((e) => e.isActive);
+  const accounts = [
+    { key: "CASH" as const, title: "Kasse (Bar)", now: pool.cashBalanceCents, month: month.summary.cash, today: day.summary.cash },
+    { key: "BANK" as const, title: "Bankkonto", now: pool.bankBalanceCents, month: month.summary.bank, today: day.summary.bank },
+  ];
 
   return (
     <>
-      <PageHeader title="Kasse & Bank" subtitle="Tageseinnahmen, Gastro-Ausgaben und Bestandskorrekturen – getrennte Bestände, lückenlos protokolliert." />
+      <PageHeader title="Kasse & Bank" subtitle="Kasse (Bar) und Bankkonto als getrennte Konten – Tageseinnahmen, Ausgaben und Korrekturen je Konto, lückenlos protokolliert." />
+
+      <div className="mb-6 grid gap-6 lg:grid-cols-2">
+        {accounts.map((a) => (
+          <section key={a.key} className="rounded-xl border border-line bg-surface p-5 md:p-6" aria-label={a.title}>
+            <div className="mb-4 flex items-baseline justify-between gap-4">
+              <h2 className="text-lg font-semibold">{a.title}</h2>
+              <p className="text-right">
+                <span className="block text-xs text-muted">Bestand jetzt</span>
+                <span className="text-3xl font-semibold tracking-tight tabular">{formatCents(a.now)}</span>
+              </p>
+            </div>
+            <p className="mb-2 text-sm font-medium text-muted">Heute</p>
+            <dl className="mb-4 space-y-1 rounded-lg bg-paper px-3 py-2 tabular">
+              <Row label={`Tageseinnahmen ${a.title}`} cents={a.today.dailyIncomeCents} sign="+" />
+              <Row label={`Ausgaben ${a.title}`} cents={a.today.expenseCents} sign="−" />
+              <Row label="Weitere Bewegungen (Rechnungen, Budget, Korrekturen …)" cents={a.today.closingCents - a.today.openingCents - a.today.dailyIncomeCents + a.today.expenseCents} sign="±" />
+            </dl>
+            <p className="mb-2 text-sm font-medium text-muted">Laufender Monat</p>
+            <AccountFlowList account={a.key} flow={a.month} />
+          </section>
+        ))}
+      </div>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-[1fr_1fr]">
-        <section className="rounded-xl border border-line bg-surface p-5 md:p-6">
-          <p className="mb-3 text-sm font-medium text-muted">Laufender Monat</p>
-          <dl className="space-y-1.5 tabular">
-            <Row label="Stand zum Monatsanfang" cents={p.openingCents} />
-            <Row label="Einnahmen aus Rechnungen" cents={p.incomeInvoiceCents} sign="+" />
-            <Row label="Tageseinnahmen / weitere Einnahmen" cents={p.incomeManualCents} sign="+" />
-            <Row label="Betriebsausgaben (Kasse/Bank)" cents={p.expenseCents} sign="−" />
-            <Row label="Budget an Personen" cents={p.allocatedCents} sign="−" />
-            <Row label="Rückgaben von Personen" cents={p.returnedCents} sign="+" />
-            <Row label="Korrekturen, Gesellschafter, Erstattungen" cents={p.otherCents} sign="±" />
-            <div className="flex items-baseline justify-between border-t-2 border-ink pt-2">
-              <dt className="font-semibold">Bestand jetzt</dt>
-              <dd className="text-3xl font-semibold tracking-tight">{formatCents(pool.poolBalanceCents)}</dd>
-            </div>
-            <Row label="davon Kasse (Bar)" cents={pool.cashBalanceCents} />
-            <Row label="davon Bankkonto" cents={pool.bankBalanceCents} />
-          </dl>
-        </section>
         <Section title="Ausgaben diesen Monat nach Kategorie">
           {cats.length ? (
             <dl className="space-y-1.5 tabular">
@@ -55,7 +64,14 @@ export default async function CashPage() {
               </div>
             </dl>
           ) : <p className="text-sm text-muted">Noch keine Betriebsausgaben in diesem Monat.</p>}
-          <p className="mt-3 text-xs text-muted">Enthält auch Einkäufe aus dem Budget von Mitarbeitern und vom Kapitalkonto von Gesellschaftern.</p>
+          <p className="mt-3 text-xs text-muted">
+            {`Davon aus Kasse (Bar) ${formatCents(month.summary.cash.expenseCents)} · vom Bankkonto ${formatCents(month.summary.bank.expenseCents)} – der Rest aus Budgets von Mitarbeitern bzw. Kapitalkonten von Gesellschaftern.`}
+          </p>
+        </Section>
+        <Section title="Budget an Mitarbeiter">
+          {active.length
+            ? <AllocationForm employees={active} poolCents={pool.poolBalanceCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
+            : <p className="text-sm text-muted">Lege zuerst Mitarbeiter an.</p>}
         </Section>
       </div>
 
@@ -66,19 +82,12 @@ export default async function CashPage() {
         <Section title="Ausgabe erfassen (Wareneinkauf / Betriebskosten)">
           <ExpenseForm today={today} persons={persons} balances={{ CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} />
         </Section>
-        <div className="space-y-6">
-          <Section title="Bestand korrigieren (Stichtag)">
-            <BalanceCorrectionForm today={today} />
-          </Section>
-          <Section title="Budget an Mitarbeiter">
-            {active.length
-              ? <AllocationForm employees={active} poolCents={pool.poolBalanceCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
-              : <p className="text-sm text-muted">Lege zuerst Mitarbeiter an.</p>}
-          </Section>
-        </div>
+        <Section title="Bestand korrigieren (Stichtag)">
+          <BalanceCorrectionForm today={today} />
+        </Section>
       </div>
 
-      <Section title="Bewegungen Kasse & Bank" flush>
+      <Section title="Bewegungen Kasse (Bar) und Bankkonto – je Buchung mit Konto" flush>
         <LedgerList rows={pool.entries} mode="pool" showEmployee admin />
       </Section>
     </>

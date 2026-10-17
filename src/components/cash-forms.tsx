@@ -20,6 +20,12 @@ function cents(v: string): number | null {
   }
 }
 
+const EXPENSE_CHANNEL: Record<Exclude<ExpenseFund, "CAPITAL">, string> = {
+  CASH: "Ausgaben Kasse (Bar)",
+  BANK: "Ausgaben Bankkonto",
+  BUDGET: `Aus ${FUND_LABEL.BUDGET}`,
+};
+
 const dateLabel = (day: string) => fmtDate(new Date(`${day}T12:00:00Z`));
 
 /** Optionales Dropdown "Person zuordnen" – bei fester Person nur ein verstecktes Feld */
@@ -48,9 +54,10 @@ export function PersonSelect({ persons, preset, required, label }: {
   );
 }
 
-interface DayInfo { count: number; cashCents: number; bankCents: number; warning: string | null }
+interface AccountDay { count: number; cents: number; warning: string | null }
+interface DayInfo { cash: AccountDay; bank: AccountDay }
 
-/** Rote Erinnerung, wenn für den Tag schon eine Einnahme gebucht ist (Buchung bleibt möglich) */
+/** Bereits gebuchte Tageseinnahmen des Datums – getrennt je Konto */
 function useDayIncomes(date: string, tick: number) {
   const [info, setInfo] = useState<DayInfo | null>(null);
   useEffect(() => {
@@ -65,20 +72,27 @@ function useDayIncomes(date: string, tick: number) {
   return info;
 }
 
-export function DuplicateWarning({ info, date }: { info: DayInfo | null; date: string }) {
-  if (!info?.warning) return null;
+/**
+ * Rote Erinnerung nur, wenn auf DASSELBE Konto erneut gebucht wird (2× Kasse oder 2× Bank).
+ * 1× Kasse + 1× Bank am selben Tag ist normal und zeigt keine Warnung. Buchung bleibt immer möglich.
+ */
+export function DuplicateWarning({ account, day }: { account: "CASH" | "BANK"; day: AccountDay }) {
+  if (!day.warning) return null;
+  const n = day.count;
   return (
     <div role="alert" className="rounded-lg border-2 border-minus bg-minus-soft px-3 py-2 text-sm text-minus">
-      <p className="font-semibold">{info.warning}</p>
+      <p className="font-semibold">{day.warning}</p>
       <p className="mt-0.5">
-        {dateLabel(date)}: {info.count} Einnahme{info.count === 1 ? "" : "n"} gebucht
-        {info.cashCents ? ` · Kasse ${formatCents(info.cashCents)}` : ""}{info.bankCents ? ` · Bank ${formatCents(info.bankCents)}` : ""}
+        {`Bereits gebucht auf ${account === "CASH" ? "Kasse (Bar)" : "Bankkonto"}: ${n} Einnahme${n === 1 ? "" : "n"}, ${formatCents(day.cents)} – Buchung trotzdem möglich.`}
       </p>
     </div>
   );
 }
 
-/** Tageseinnahme: Kasse (Bar) und Bankkonto für ein Datum – mit einem Klick als gemeinsame Bewegung */
+/**
+ * Tageseinnahme: Kasse (Bar) und Bankkonto für ein Datum in einem Schritt –
+ * gebucht werden zwei getrennte Einnahmen auf zwei getrennte Konten (nie zusammengerechnet).
+ */
 export function DailyIncomeForm({ today, persons, preset }: { today: string; persons: PersonOption[]; preset?: PersonOption | null }) {
   const { call, busy, error, setError } = useApi();
   const [date, setDate] = useState(today);
@@ -87,21 +101,25 @@ export function DailyIncomeForm({ today, persons, preset }: { today: string; per
   const [tick, setTick] = useState(0);
   const [done, setDone] = useState<string | null>(null);
   const info = useDayIncomes(date, tick);
-  const total = (cents(cash) ?? 0) + (cents(bank) ?? 0);
+  const hasCash = !!cents(cash), hasBank = !!cents(bank);
 
   return (
     <form className="space-y-3" onSubmit={async (e) => {
       e.preventDefault();
       setDone(null);
       if ((cash && cents(cash) === null) || (bank && cents(bank) === null)) return setError("Ungültiger Betrag");
-      if (!total) return setError("Bitte Betrag für Kasse (Bar) und/oder Bankkonto eingeben");
+      if (!hasCash && !hasBank) return setError("Bitte Betrag für Kasse (Bar) und/oder Bankkonto eingeben");
       const form = e.currentTarget;
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
-      const r = await call<{ totalCents: number }>("POST", "/api/v1/cash/income", {
+      const r = await call<{ cashCents: number; bankCents: number }>("POST", "/api/v1/cash/income", {
         bookingDate: date, cashCents: cash || null, bankCents: bank || null, description: f.description, personId: f.personId || null,
       });
       if (r) {
-        setDone(`Gebucht: ${formatCents(r.totalCents)} am ${dateLabel(date)}`);
+        setDone([
+          `Gebucht am ${dateLabel(date)}:`,
+          r.cashCents ? `Tageseinnahme Kasse (Bar) +${formatCents(r.cashCents)}` : null,
+          r.bankCents ? `Tageseinnahme Bankkonto +${formatCents(r.bankCents)}` : null,
+        ].filter(Boolean).join(" "));
         setCash(""); setBank("");
         (form.elements.namedItem("description") as HTMLInputElement).value = "";
         setTick((t) => t + 1);
@@ -110,18 +128,22 @@ export function DailyIncomeForm({ today, persons, preset }: { today: string; per
       <Field label="Datum">
         <input type="date" value={date} max={today} required onChange={(e) => setDate(e.target.value)} className={inputCls} />
       </Field>
-      <DuplicateWarning info={info} date={date} />
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Kasse (Bar)"><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} /></Field>
-        <Field label="Bankkonto"><input value={bank} onChange={(e) => setBank(e.target.value)} inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} /></Field>
+        <Field label="Tageseinnahme Kasse (Bar)" hint={info?.cash.count ? `Bereits gebucht: ${formatCents(info.cash.cents)}` : undefined}>
+          <input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} />
+        </Field>
+        <Field label="Tageseinnahme Bankkonto" hint={info?.bank.count ? `Bereits gebucht: ${formatCents(info.bank.cents)}` : undefined}>
+          <input value={bank} onChange={(e) => setBank(e.target.value)} inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} />
+        </Field>
       </div>
-      <p className="flex justify-between text-sm"><span className="text-muted">Summe Tageseinnahme</span><strong className="tabular">{formatCents(total)}</strong></p>
+      {info && hasCash && <DuplicateWarning account="CASH" day={info.cash} />}
+      {info && hasBank && <DuplicateWarning account="BANK" day={info.bank} />}
       <Field label="Wofür?"><input name="description" required minLength={2} defaultValue="Tageseinnahme" className={inputCls} dir="auto" /></Field>
       <PersonSelect persons={persons} preset={preset} />
       <ErrorNote error={error} />
       {done && <p className="text-sm font-medium text-ledger">{done}</p>}
       <button disabled={busy} className={cx(btn.base, btn.primary, "w-full")}>
-        {cash && bank ? "Kasse + Bank gemeinsam buchen" : "Einnahme buchen"}
+        {hasCash && hasBank ? "Kasse und Bank getrennt buchen" : hasBank ? "Auf Bankkonto buchen" : "In Kasse (Bar) buchen"}
       </button>
     </form>
   );
@@ -150,10 +172,10 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
       if (await call("POST", "/api/v1/cash/expenses", fd)) { form.reset(); setHasFile(false); }
     }}>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Herkunftskonto">
+        <Field label="Ausgabenkanal (Herkunftskonto)">
           <select value={fund} onChange={(e) => setFund(e.target.value as typeof fund)} className={inputCls}>
             {funds.map((f) => (
-              <option key={f} value={f}>{FUND_LABEL[f]}{balances[f] != null ? ` · ${formatCents(balances[f]!)}` : ""}</option>
+              <option key={f} value={f}>{EXPENSE_CHANNEL[f]}{balances[f] != null ? ` · Bestand ${formatCents(balances[f]!)}` : ""}</option>
             ))}
           </select>
         </Field>

@@ -22,7 +22,8 @@ export async function adminDashboard(ctx: Ctx) {
       cashBalanceCents: await cashBalance(tx, tenantId),
       bankBalanceCents: await bankBalance(tx, tenantId),
       month: {
-        incomeCents: month.pool.incomeInvoiceCents + month.pool.incomeManualCents,
+        cash: month.cash,
+        bank: month.bank,
         allocatedCents: month.pool.allocatedCents,
         receiptsCents: month.totals.receiptsCents,
         adjustmentsCents: month.totals.adjustmentsCents,

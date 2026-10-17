@@ -3,6 +3,7 @@
 //   Auslagenkonto       claimDeltaCents    (privat ausgelegt = Verbindlichkeit der Firma an die Person)
 //   Kapitalkonto        partnerDeltaCents  (nur Gesellschafter)
 import { ACCOUNT_LABEL, type AccountKind } from "./accounts";
+import { entryLabel } from "./cash";
 import { LEDGER_LABEL, type LedgerType } from "./ledger";
 import { formatCents } from "./money";
 import { fmtDate } from "./period";
@@ -51,6 +52,8 @@ export interface TransferRow {
   account: AccountKind;
   accountLabel: string;
   amountCents: number;
+  /** Wirkung auf das Firmenkonto: Einnahme +, Ausgabe − */
+  deltaCents: number;
   kind: string;
   purpose: string;
   reversed: boolean;
@@ -82,7 +85,9 @@ export interface PersonReport {
 
 const effType = (r: PersonLedgerRow): LedgerType => (r.type === "REVERSAL" ? r.reversedType ?? "REVERSAL" : r.type);
 const kindLabel = (r: PersonLedgerRow) =>
-  r.type === "REVERSAL" && r.reversedType ? `Storno: ${LEDGER_LABEL[r.reversedType]}` : LEDGER_LABEL[r.type];
+  r.type === "REVERSAL" && r.reversedType
+    ? `Storno: ${entryLabel(r.reversedType, LEDGER_LABEL[r.reversedType], r)}`
+    : entryLabel(r.type, LEDGER_LABEL[r.type], r);
 const z = (v: number) => v + 0;
 
 function sum(rows: PersonLedgerRow[], field: "walletDeltaCents" | "claimDeltaCents" | "partnerDeltaCents",
@@ -190,7 +195,7 @@ export function buildPersonReport(input: {
         id: r.id, date: r.bookingDate, direction,
         directionLabel: DIRECTION_LABEL[direction],
         account, accountLabel: ACCOUNT_LABEL[account],
-        amountCents: Math.abs(delta), kind: kindLabel(r), purpose: r.description ?? "",
+        amountCents: Math.abs(delta), deltaCents: delta, kind: kindLabel(r), purpose: r.description ?? "",
         reversed: reversedIds.has(r.id), isReversal: r.type === "REVERSAL",
       };
     });
@@ -234,10 +239,14 @@ export function buildPersonReport(input: {
     statements.push(`Restguthaben Kapitalkonto ${name}: ${formatCents(capital.closingCents)}${bought > 0 ? ` – davon ${formatCents(bought)} für Einkäufe der Firma verrechnet` : ""}.`);
   }
   const live = transfers.filter((x) => !x.reversed && !x.isReversal);
-  const spent = live.filter((x) => x.direction === "COMPANY_EXPENSE").reduce((v, x) => v + x.amountCents, 0);
-  if (spent) statements.push(`${name} hat ${formatCents(spent)} Firmenmittel (Kasse/Bank) für die Firma ausgegeben.`);
-  const earned = live.filter((x) => x.direction === "COMPANY_INCOME").reduce((v, x) => v + x.amountCents, 0);
-  if (earned) statements.push(`Über ${name} vereinnahmt: ${formatCents(earned)} – direkt auf Kasse/Bankkonto der Firma, kein Guthaben der Person.`);
+  const perAccount = (dir: TransferRow["direction"]) => (["CASH", "BANK"] as const)
+    .map((a) => [a, live.filter((x) => x.direction === dir && x.account === a).reduce((v, x) => v + x.amountCents, 0)] as const)
+    .filter(([, c]) => c > 0)
+    .map(([a, c]) => `${ACCOUNT_LABEL[a]} ${formatCents(c)}`);
+  const spent = perAccount("COMPANY_EXPENSE");
+  if (spent.length) statements.push(`Von ${name} für die Firma ausgegeben (Firmenmittel): ${spent.join(" · ")}.`);
+  const earned = perAccount("COMPANY_INCOME");
+  if (earned.length) statements.push(`Über ${name} vereinnahmt: ${earned.join(" · ")} – jeweils direkt auf das Firmenkonto, kein Guthaben der Person.`);
   if (!statements.length) statements.push(`Keine Bewegungen und keine offenen Beträge für ${name} im Zeitraum.`);
 
   return { person, from: input.from, to: input.to, accounts, transfers, movements, statements };

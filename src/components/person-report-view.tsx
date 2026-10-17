@@ -56,13 +56,13 @@ export function PersonReportView({ r }: { r: FullPersonReport }) {
 
       <Section title={`Geldtransfers Kasse / Bankkonto (${r.transfers.length})`} flush>
         {!r.transfers.length ? <Empty title="Keine Transfers im Zeitraum" /> : (
-          <Table head={["Datum", "Richtung", "Konto", "Betrag", "Vorgang", "Verwendungszweck"].map((h) => <span key={h} className={h === "Betrag" ? "block text-right" : ""}>{h}</span>)}>
+          <Table head={["Datum", "Richtung", "Konto", "Firmenkonto ±", "Vorgang", "Verwendungszweck"].map((h) => <span key={h} className={h === "Firmenkonto ±" ? "block text-right" : ""}>{h}</span>)}>
             {r.transfers.map((t) => (
               <tr key={t.id} className={t.reversed ? "opacity-60" : ""}>
                 <td className={td}>{fmtDate(t.date)}</td>
                 <td className={td}>{t.directionLabel}</td>
                 <td className={td}>{t.accountLabel}</td>
-                <td className={td + " text-right"}><Money cents={t.amountCents} /></td>
+                <td className={td + " text-right"}><Money cents={t.deltaCents} signed /></td>
                 <td className={td}>{t.kind}{t.reversed && <> <Pill>storniert</Pill></>}</td>
                 <td className={td} dir="auto">{t.purpose}</td>
               </tr>

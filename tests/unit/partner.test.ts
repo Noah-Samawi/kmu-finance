@@ -10,6 +10,7 @@ import type { Deltas } from "@/domain/ledger";
 import { partnerSelfBookSchema } from "@/lib/validation/schemas";
 import type { PartnerBookingRow } from "@/application/partners/partner-bookings";
 import type { Summary } from "@/application/reports/reports";
+import { accountFlow } from "@/domain/cash";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/infrastructure/db/tenant-tx", () => ({ withTenant: vi.fn(), lockTenantLedger: vi.fn() }));
@@ -174,7 +175,12 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
     const s: Summary = {
       from: "2026-10-01", to: "2026-10-11",
       pool: { openingCents: 0, incomeInvoiceCents: 0, incomeManualCents: 0, allocatedCents: 200_000, returnedCents: 0, expenseCents: 4_990, otherCents: 0, closingCents: -204_990 },
-      cash: { openingCents: 0, closingCents: 0 }, bank: { openingCents: 500_000, closingCents: 260_000 },
+      cash: accountFlow("CASH", 0, []),
+      bank: accountFlow("BANK", 500_000, [
+        { type: "ALLOCATION", cashDeltaCents: 0, bankDeltaCents: -200_000 },
+        { type: "EXPENSE", cashDeltaCents: 0, bankDeltaCents: -4_990 },
+        { type: "PARTNER_DRAW", cashDeltaCents: 0, bankDeltaCents: -35_010 },
+      ]),
       carryForward: { cashCents: 0, bankCents: 500_000, poolCents: 0 },
       totals: { receiptsCents: 0, adjustmentsCents: 0, walletsOpenCents: 0, claimsOpenCents: 0, expensesCents: 4_990, expensesByCategory: [{ category: "WAREN", label: "Wareneinkauf (Lebensmittel)", cents: 4_990 }] },
       employees: [],

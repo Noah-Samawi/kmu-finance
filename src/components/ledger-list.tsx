@@ -3,12 +3,14 @@ import type { LedgerRow } from "@/application/reports/reports";
 import { LEDGER_LABEL } from "@/domain/ledger";
 import { fmtDateTime } from "@/domain/period";
 import { DIRECTLY_REVERSIBLE } from "@/domain/ledger";
-import { categoryLabel } from "@/domain/cash";
+import { categoryLabel, entryLabel } from "@/domain/cash";
 import { Empty, Money, Pill } from "./ui";
 import { ReverseButton } from "./reverse-button";
 
 function label(r: LedgerRow) {
-  return r.type === "REVERSAL" && r.reversedType ? `Storno: ${LEDGER_LABEL[r.reversedType]}` : LEDGER_LABEL[r.type];
+  return r.type === "REVERSAL" && r.reversedType
+    ? `Storno: ${entryLabel(r.reversedType, LEDGER_LABEL[r.reversedType], r)}`
+    : entryLabel(r.type, LEDGER_LABEL[r.type], r);
 }
 
 /**
@@ -34,7 +36,7 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds }: {
               {reversed.has(r.id) && r.type !== "RECEIPT" && <Pill>storniert</Pill>}
               {r.closingId && <Pill>abgeschlossen</Pill>}
               {r.category && <Pill tone="amber">{categoryLabel(r.category)}</Pill>}
-              {r.batchId && <Pill>Tageseinnahme Kasse + Bank</Pill>}
+              {r.batchId && <Pill>zusammen erfasst · getrenntes Konto</Pill>}
             </p>
             <p className="truncate text-sm text-muted">
               {r.invoiceNumber && admin && r.invoiceId ? (
@@ -54,10 +56,16 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds }: {
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1 text-right">
-            {(mode === "pool" || mode === "both") && r.poolDeltaCents !== 0 && (
+            {(mode === "pool" || mode === "both") && r.cashDeltaCents !== 0 && (
               <span className="text-sm">
-                {mode === "both" && <span className="me-1 text-xs text-muted">Kasse</span>}
-                <Money cents={r.poolDeltaCents} signed className="font-semibold" />
+                <span className="me-1 text-xs text-muted">Kasse (Bar)</span>
+                <Money cents={r.cashDeltaCents} signed className="font-semibold" />
+              </span>
+            )}
+            {(mode === "pool" || mode === "both") && r.bankDeltaCents !== 0 && (
+              <span className="text-sm">
+                <span className="me-1 text-xs text-muted">Bankkonto</span>
+                <Money cents={r.bankDeltaCents} signed className="font-semibold" />
               </span>
             )}
             {(mode === "wallet" || mode === "both") && r.walletDeltaCents !== 0 && (
@@ -77,9 +85,6 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds }: {
                 <span className="me-1 text-xs text-muted">Kapital</span>
                 <Money cents={r.partnerDeltaCents} signed className="font-semibold" />
               </span>
-            )}
-            {(r.accountKind === "CASH" || r.accountKind === "BANK") && (r.cashDeltaCents !== 0 || r.bankDeltaCents !== 0) && (
-              <span className="text-xs text-muted">{r.accountKind === "BANK" ? "Bankkonto" : "Kasse Bar"}</span>
             )}
             {admin && DIRECTLY_REVERSIBLE.includes(r.type) && !reversed.has(r.id) && !r.closingId && <ReverseButton id={r.id} />}
           </div>

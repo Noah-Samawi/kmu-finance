@@ -4,6 +4,7 @@ import { getSummary, listClosings, type Summary } from "@/application/reports/re
 import { listEmployees } from "@/application/employees/employees";
 import { btn, cx, Field, inputCls, Money, PageHeader, Section, Table, td } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
+import { AccountFlowList } from "@/components/account-flow";
 import { PersonReportCard } from "@/components/person-report-view";
 import { listPersonReports } from "@/application/reports/person-report";
 import { formatCents } from "@/domain/money";
@@ -50,25 +51,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </form>
 
       {!employeeId && (
-        <div className="mb-6 grid gap-3 sm:grid-cols-2">
-          <Section title="Kasse (Bar)">
-            <dl className="space-y-1.5 tabular">
-              <Line label="Saldo-Übertrag (Anfang)" cents={s.cash.openingCents} />
-              <Line label="Ende (wird nächster Übertrag)" cents={s.cash.closingCents} strong />
-            </dl>
-          </Section>
-          <Section title="Bankkonto">
-            <dl className="space-y-1.5 tabular">
-              <Line label="Saldo-Übertrag (Anfang)" cents={s.bank.openingCents} />
-              <Line label="Ende (wird nächster Übertrag)" cents={s.bank.closingCents} strong />
-            </dl>
-          </Section>
+        <div className="mb-6 grid gap-6 lg:grid-cols-2">
+          <Section title="Kasse (Bar)"><AccountFlowList account="CASH" flow={s.cash} /></Section>
+          <Section title="Bankkonto"><AccountFlowList account="BANK" flow={s.bank} /></Section>
         </div>
       )}
       <div className="grid gap-6 lg:grid-cols-2">
-        {!employeeId && <PoolSummary s={s} />}
         <Section title="Ausgaben im Zeitraum">
           <dl className="space-y-1.5 tabular">
+            {!employeeId && <Line label="Ausgaben Kasse (Bar)" cents={s.cash.expenseCents} />}
+            {!employeeId && <Line label="Ausgaben Bankkonto" cents={s.bank.expenseCents} />}
             <Line label="Mit Beleg" cents={s.totals.receiptsCents} />
             <Line label="Ausgleich ohne Beleg" cents={s.totals.adjustmentsCents} />
             {s.totals.expensesByCategory.map((c) => <Line key={c.category} label={`Betriebsausgabe: ${c.label}`} cents={c.cents} />)}
@@ -109,7 +101,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                     <li key={c.id} className="flex items-center justify-between gap-3 px-4 py-3 md:px-5">
                       <div>
                         <p className="font-medium">{c.periodType === "DAY" ? `Tag ${fmtDate(c.periodStart)}` : `Monat ${c.periodStart.toLocaleDateString("de-DE", { month: "long", year: "numeric", timeZone: "Europe/Berlin" })}`}</p>
-                        <p className="text-xs text-muted">{c.closedByName}, {fmtDateTime(c.closedAt)} – Kasse {formatCents(t.pool.closingCents)}</p>
+                        <p className="text-xs text-muted">{`${c.closedByName}, ${fmtDateTime(c.closedAt)} – Kasse (Bar) ${formatCents(t.cash?.closingCents ?? 0)} · Bankkonto ${formatCents(t.bank?.closingCents ?? 0)}`}</p>
                       </div>
                       <a className="text-sm font-medium text-ledger hover:underline" href={`/api/v1/reports/export?format=pdf&from=${fromKey}&to=${toKey}`}>PDF</a>
                     </li>
@@ -121,23 +113,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </div>
       </div>
     </>
-  );
-}
-
-function PoolSummary({ s }: { s: Summary }) {
-  return (
-    <Section title="Kassenbestand">
-      <dl className="space-y-1.5 tabular">
-        <Line label="Saldo-Übertrag (Anfangsbestand)" cents={s.pool.openingCents} />
-        <Line label="+ Einnahmen aus Rechnungen" cents={s.pool.incomeInvoiceCents} />
-        <Line label="+ Weitere Einnahmen" cents={s.pool.incomeManualCents} />
-        <Line label="− An Mitarbeiter verteilt" cents={s.pool.allocatedCents} />
-        <Line label="+ Von Mitarbeitern zurück" cents={s.pool.returnedCents} />
-        <Line label="− Betriebsausgaben (Kasse/Bank)" cents={s.pool.expenseCents} />
-        <Line label="± Korrekturen, Gesellschafter, Erstattungen" cents={s.pool.otherCents} />
-        <Line label="Endbestand" cents={s.pool.closingCents} strong />
-      </dl>
-    </Section>
   );
 }
 
