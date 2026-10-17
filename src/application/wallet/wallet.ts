@@ -98,7 +98,7 @@ export async function reverseEntry(ctx: Ctx, entryId: string, reason: string) {
       if (p + (d.partnerDeltaCents ?? 0) < 0) throw insufficient("Kapitalkonto", p);
     }
     const entry = await insertEntry(tx, ctx, tenantId, {
-      type: "REVERSAL", ...d, employeeId: orig.employeeId, reversalOfId: orig.id,
+      type: "REVERSAL", ...d, employeeId: orig.employeeId, reversalOfId: orig.id, category: orig.category,
       description: `Storno: ${reason}`,
     });
     await audit(tx, ctx, "ledger.reversal", "LedgerEntry", entry.id, { reversalOf: orig.id, reason });

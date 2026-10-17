@@ -12,7 +12,7 @@ const NAV: readonly { href: string; label: MsgKey; badgeKey?: "receipts" }[] = [
   { href: "/admin/dashboard", label: "nav.dashboard" },
   { href: "/admin/invoices", label: "nav.invoices" },
   { href: "/admin/contacts", label: "nav.contacts" },
-  { href: "/admin/pool", label: "nav.pool" },
+  { href: "/admin/cash", label: "nav.pool" },
   { href: "/admin/bank", label: "nav.bank" },
   { href: "/admin/employees", label: "nav.employees" },
   { href: "/admin/partners", label: "nav.partners" },

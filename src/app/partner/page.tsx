@@ -24,10 +24,10 @@ export default async function PartnerHome() {
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-3">
         {cards.map((c) => (
-          <section key={c.label} className={`rounded-xl border bg-surface p-4 ${c.accent ? "border-amber-400" : "border-line"}`}>
+          <section key={c.label} className={`rounded-xl border bg-surface p-4 ${c.accent ? "border-minus/60" : "border-line"}`}>
             <p className="text-sm text-muted">{c.label}</p>
-            <p className="mt-1 text-2xl font-semibold tabular">{formatCents(c.cents)}</p>
-            {c.firm !== undefined && c.firm !== 0 && <p className="text-xs font-medium text-amber-700">{t("pb.firmLiability")}: {formatCents(c.firm)}</p>}
+            <p className={`mt-1 text-2xl font-semibold tabular ${c.accent ? "text-minus" : ""}`}>{formatCents(c.cents)}</p>
+            {c.firm !== undefined && c.firm !== 0 && <p className="text-xs font-medium text-minus">{t("pb.firmLiability")}: {formatCents(c.firm)}</p>}
             <p className="mt-1 text-xs text-muted">{c.hint}</p>
           </section>
         ))}

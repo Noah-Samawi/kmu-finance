@@ -45,6 +45,7 @@ export const ledgerTypeEnum = pgEnum("LedgerType", [
   "PARTNER_OUTLAY",        // Vorgelegtes Geld Gesellschafter + (eigene Tasche)
   "PARTNER_OUTLAY_REFUND", // Vorgelegtes Geld -, Kasse/Bank - (gezielte Erstattung)
   "PARTNER_EXPENSE",       // Kasse/Bank - (Gesellschafter zahlt mit Firmenmitteln)
+  "EXPENSE",               // Betriebsausgabe mit Kategorie: Kasse/Bank -, Budget - oder Kapital -
 ]);
 export const paymentMethodEnum = pgEnum("PaymentMethod", ["TRANSFER", "CASH"]);
 export const accountKindEnum = pgEnum("AccountKind", ["CASH", "BANK"]);
@@ -54,6 +55,7 @@ export const churchTaxEnum = pgEnum("ChurchTax", ["NONE", "EIGHT", "NINE"]);
 export const fundingSourceEnum = pgEnum("FundingSource", ["PRIVATE", "BANK", "CASH"]);
 export const partnerBookingKindEnum = pgEnum("PartnerBookingKind", [
   "DEPOSIT", "OUTLAY", "DRAW", "PROFIT", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED", "OUTLAY_REFUND",
+  "PURCHASE_CAPITAL", "PURCHASE_BUDGET",
 ]);
 export const receiptStatusEnum = pgEnum("ReceiptStatus", ["SUBMITTED", "APPROVED", "REJECTED"]);
 export const periodTypeEnum = pgEnum("PeriodType", ["DAY", "MONTH"]);
@@ -247,12 +249,28 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   receiptId: text("receiptId").unique().references(() => receipts.id),
   reversalOfId: text("reversalOfId").unique().references((): AnyPgColumn => ledgerEntries.id),
   closingId: text("closingId").references(() => periodClosings.id),
+  /** Ausgaben-Kategorie (EXPENSE_CATEGORIES) */
+  category: text("category"),
+  /** verbindet Teilbuchungen einer Bewegung (z. B. Tageseinnahme Kasse + Bank) */
+  batchId: text("batchId"),
   createdAt: createdAt(), // KEIN updatedAt: unveränderlich
 }, (t) => [
   index("Ledger_tenant_date_idx").on(t.tenantId, t.bookingDate),
   index("Ledger_tenant_emp_date_idx").on(t.tenantId, t.employeeId, t.bookingDate),
   index("Ledger_tenant_type_idx").on(t.tenantId, t.type),
 ]);
+
+// Beleg zu einer Hauptbuchzeile (z. B. Metro-Einkauf aus der Kasse) – unveränderlich
+export const ledgerAttachments = pgTable("LedgerAttachment", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  ledgerEntryId: text("ledgerEntryId").notNull().unique().references(() => ledgerEntries.id),
+  fileKey: text("fileKey").notNull(),
+  mime: text("mime").notNull(),
+  name: text("name").notNull(),
+  createdById: text("createdById").notNull().references(() => users.id),
+  createdAt: createdAt(),
+});
 
 // Gesellschafter-Vorgänge mit Mittelherkunft und Begründung (unveränderlich, 1:1 zum Hauptbuch)
 export const partnerBookings = pgTable("PartnerBooking", {

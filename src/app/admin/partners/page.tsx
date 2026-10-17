@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { listPartners } from "@/application/partners/partners";
+import { poolOverview } from "@/application/pool/pool";
+import { todayKey } from "@/domain/period";
 import { Empty, Money, PageHeader, Pill, Section } from "@/components/ui";
 import { PartnerBookingList } from "@/components/partner-booking-list";
 import { PartnerForms } from "./partner-forms";
@@ -10,11 +12,12 @@ export const metadata: Metadata = { title: "Partner & Gesellschafter" };
 
 export default async function PartnersPage() {
   const user = await requireUser("ADMIN");
-  const partners = await listPartners(user);
+  const [partners, pool] = await Promise.all([listPartners(user), poolOverview(user)]);
+  const today = todayKey();
   return (
     <>
       <PageHeader title="Partner & Gesellschafter"
-        subtitle="Kapitalkonto, Vorgelegtes Geld (Auslagen) und Budget – strikt getrennt, Erstattung nur gezielt" />
+        subtitle="Kapitalkonto, Auslagenkonto (privat vorgelegt) und Budget – strikt getrennt. Alle Buchungen direkt hier, ohne Kontowechsel." />
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="space-y-6">
           {partners.length === 0 ? <Section><Empty title="Noch keine Gesellschafter">Lege rechts den ersten Partner an.</Empty></Section> : (
@@ -32,13 +35,13 @@ export default async function PartnersPage() {
                       <div><dt className="text-xs text-muted">Kapitalkonto</dt><dd><Money cents={p.capitalCents} className="font-semibold" /></dd></div>
                       <div>
                         <dt className="text-xs text-muted">Auslagenkonto – Firma schuldet</dt>
-                        <dd><Money cents={p.outlayOpenCents} className={p.outlayOpenCents > 0 ? "font-semibold text-amber-700" : "font-semibold"} /></dd>
-                        {p.outlayOpenCents > 0 && <dd className="text-xs text-amber-700">Verbindlichkeit der Firma <Money cents={-p.outlayOpenCents} /></dd>}
+                        <dd><Money cents={p.outlayOpenCents} className={p.outlayOpenCents > 0 ? "font-semibold text-minus" : "font-semibold"} /></dd>
+                        {p.outlayOpenCents > 0 && <dd className="text-xs text-minus">offene Verbindlichkeit der Firma <Money cents={-p.outlayOpenCents} /></dd>}
                       </div>
                       <div><dt className="text-xs text-muted">Budget / Vorschuss</dt><dd><Money cents={p.budgetCents} className="font-semibold" /></dd></div>
                     </dl>
                   </div>
-                  <PartnerForms partner={p} />
+                  <PartnerForms partner={p} today={today} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
                 </div>
                 <div className="border-t border-line">
                   <p className="px-4 pt-3 text-sm font-medium md:px-5">Buchungen (Herkunft, Zweck, Status)</p>

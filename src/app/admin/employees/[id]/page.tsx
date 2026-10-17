@@ -7,6 +7,7 @@ import { getSummary } from "@/application/reports/reports";
 import { btn, cx, PageHeader, Pill, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { formatCents } from "@/domain/money";
+import { DailyIncomeForm, ExpenseForm } from "@/components/cash-forms";
 import { monthKey, todayKey } from "@/domain/period";
 import { getPersonnelFile } from "@/application/hr/hr";
 import { AllocationForm } from "../../pool/pool-forms";
@@ -24,6 +25,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     getEmployee(user, id), poolOverview(user), getSummary(user, from, today, id), getPersonnelFile(user, id),
   ]);
   const m = report.summary.employees[0];
+  const person = { id: emp.id, name: emp.name, role: "EMPLOYEE" as const, isActive: emp.isActive };
 
   return (
     <>
@@ -36,14 +38,17 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
               <div>
                 <p className="text-sm text-muted">Firmenbudget beim Mitarbeiter</p>
                 <p className="text-4xl font-semibold tracking-tight tabular">{formatCents(emp.balanceCents)}</p>
-                <p className="mt-2 text-sm">Auslagenkonto (Firma schuldet {emp.name}): <span className="font-semibold tabular">{formatCents(emp.claimCents)}</span>
-                  {" · "}Saldo vs. Firma: <span className="font-semibold tabular">{formatCents(emp.firmBalanceCents)}</span> <span className="text-muted">(plus = Firma schuldet MA)</span></p>
+                <p className="mt-2 text-sm">Auslagenkonto (Firma schuldet {emp.name}):{" "}
+                  <span className={cx("font-semibold tabular", emp.claimCents > 0 && "text-minus")}>{formatCents(emp.claimCents)}</span>
+                  {emp.claimCents > 0 && <span className="text-minus"> · offene Verbindlichkeit der Firma {formatCents(-emp.claimCents)}</span>}</p>
+                <p className="text-sm">Saldo vs. Firma: <span className="font-semibold tabular">{formatCents(emp.firmBalanceCents)}</span> <span className="text-muted">(plus = Firma schuldet MA)</span></p>
               </div>
               {m && (
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm tabular sm:grid-cols-4">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm tabular sm:grid-cols-5">
                   <div><dt className="text-muted">Erhalten</dt><dd>{formatCents(m.allocatedCents)}</dd></div>
                   <div><dt className="text-muted">Belege</dt><dd>{formatCents(m.receiptsCents)}</dd></div>
                   <div><dt className="text-muted">Ausgleich</dt><dd>{formatCents(m.adjustmentsCents)}</dd></div>
+                  <div><dt className="text-muted">Einkäufe</dt><dd>{formatCents(m.expensesCents)}</dd></div>
                   <div><dt className="text-muted">Zurück</dt><dd>{formatCents(m.returnedCents)}</dd></div>
                 </dl>
               )}
@@ -57,11 +62,20 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             <LedgerList rows={report.entries} mode="wallet" admin />
           </Section>
         </div>
-        <Section title="Budget zuteilen">
-          {emp.isActive
-            ? <AllocationForm employees={[]} poolCents={pool.poolBalanceCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} presetEmployeeId={emp.id} />
-            : <p className="text-sm text-muted">Gesperrte Mitarbeiter erhalten kein Budget.</p>}
-        </Section>
+        <div className="space-y-6">
+          <Section title="Budget zuteilen">
+            {emp.isActive
+              ? <AllocationForm employees={[]} poolCents={pool.poolBalanceCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} presetEmployeeId={emp.id} />
+              : <p className="text-sm text-muted">Gesperrte Mitarbeiter erhalten kein Budget.</p>}
+          </Section>
+          <Section title={`Ausgabe / Einkauf durch ${emp.name}`}>
+            <ExpenseForm today={today} persons={[]} preset={person} funds={["BUDGET", "CASH", "BANK"]}
+              balances={{ BUDGET: emp.balanceCents, CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} />
+          </Section>
+          <Section title={`Einnahme über ${emp.name}`}>
+            <DailyIncomeForm today={today} persons={[]} preset={person} />
+          </Section>
+        </div>
       </div>
       <Section title="Digitale Personalakte" className="mt-6">
         <HrPanel employeeId={emp.id} profile={hr.profile as Record<string, unknown> | null} documents={hr.documents} payslips={hr.payslips} />

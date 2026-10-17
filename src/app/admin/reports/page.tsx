@@ -71,6 +71,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <dl className="space-y-1.5 tabular">
             <Line label="Mit Beleg" cents={s.totals.receiptsCents} />
             <Line label="Ausgleich ohne Beleg" cents={s.totals.adjustmentsCents} />
+            {s.totals.expensesByCategory.map((c) => <Line key={c.category} label={`Betriebsausgabe: ${c.label}`} cents={c.cents} />)}
+            <Line label="Betriebsausgaben gesamt" cents={s.totals.expensesCents} />
             <Line label="Offene Budgets am Ende" cents={s.totals.walletsOpenCents} />
             <Line label="Offene Auslagen-Ansprüche" cents={s.totals.claimsOpenCents ?? 0} strong />
           </dl>
@@ -131,6 +133,8 @@ function PoolSummary({ s }: { s: Summary }) {
         <Line label="+ Weitere Einnahmen" cents={s.pool.incomeManualCents} />
         <Line label="− An Mitarbeiter verteilt" cents={s.pool.allocatedCents} />
         <Line label="+ Von Mitarbeitern zurück" cents={s.pool.returnedCents} />
+        <Line label="− Betriebsausgaben (Kasse/Bank)" cents={s.pool.expenseCents} />
+        <Line label="± Korrekturen, Gesellschafter, Erstattungen" cents={s.pool.otherCents} />
         <Line label="Endbestand" cents={s.pool.closingCents} strong />
       </dl>
     </Section>

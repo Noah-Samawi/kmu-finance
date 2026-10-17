@@ -60,7 +60,7 @@ export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense,
   claimCents?: number; cashCents?: number; bankCents?: number;
 }) {
   const { call, busy, error } = useApi();
-  const [mode, setMode] = useState<null | "adjust" | "return" | "password" | "repay">(null);
+  const [mode, setMode] = useState<null | "adjust" | "return" | "password" | "repay" | "credit">(null);
   const toggle = (m: typeof mode) => setMode(mode === m ? null : m);
 
   return (
@@ -69,6 +69,7 @@ export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense,
       <div className="flex flex-wrap gap-2">
         <button className={cx(btn.base, btn.secondary, btn.sm)} disabled={balanceCents <= 0} onClick={() => toggle("adjust")}>Ausgleich buchen</button>
         <button className={cx(btn.base, btn.secondary, btn.sm)} disabled={balanceCents <= 0} onClick={() => toggle("return")}>Restgeld zurücknehmen</button>
+        <button className={cx(btn.base, btn.secondary, btn.sm)} onClick={() => toggle("credit")}>Gutschrift / Auslage erfassen</button>
         <button className={cx(btn.base, btn.primary, btn.sm)} disabled={!claimCents || claimCents <= 0} onClick={() => toggle("repay")}>Auslage erstatten</button>
         <button className={cx(btn.base, btn.secondary, btn.sm)} onClick={() => toggle("password")}>Passwort zurücksetzen</button>
         <button disabled={busy} className={cx(btn.base, btn.sm, isActive ? btn.danger : btn.primary)}
@@ -143,6 +144,23 @@ export function WalletActions({ id, balanceCents, isActive, canEnterCashExpense,
           <Field label="Betrag" hint="Leer = gesamter Anspruch"><input name="amount" inputMode="decimal" className={cx(inputCls, "text-right")} /></Field>
           <Field label="Wofür? (Pflicht)"><input name="description" required minLength={3} className={inputCls} dir="auto" /></Field>
           <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Erstattung buchen</button>
+        </form>
+      )}
+      {mode === "credit" && (
+        <form className="space-y-3 rounded-lg border border-line bg-paper p-3" onSubmit={async (e) => {
+          e.preventDefault();
+          const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+          if (await call("POST", `/api/v1/employees/${id}/outlay`, {
+            amountCents: f.amount, description: f.description, bookingDate: f.bookingDate || undefined,
+          })) setMode(null);
+        }}>
+          <p className="text-sm text-muted">Der Mitarbeiter hat privat für die Firma bezahlt: Betrag landet auf seinem Auslagenkonto (Firma schuldet ihm das Geld) – nie im Budget.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Betrag"><input name="amount" required inputMode="decimal" className={cx(inputCls, "text-right")} /></Field>
+            <Field label="Datum"><input name="bookingDate" type="date" className={inputCls} /></Field>
+          </div>
+          <Field label="Wofür? (Pflicht)"><input name="description" required minLength={3} className={inputCls} dir="auto" /></Field>
+          <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm)}>Gutschrift buchen</button>
         </form>
       )}
       {mode === "password" && (

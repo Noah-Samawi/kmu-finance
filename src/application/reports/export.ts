@@ -4,6 +4,7 @@ import type { Tx } from "@/infrastructure/db/client";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
 import { tenants, users } from "@/infrastructure/db/schema";
 import { PdfWriter, A4, MARGIN } from "@/infrastructure/pdf/pdf-kit";
+import { categoryLabel } from "@/domain/cash";
 import { LEDGER_LABEL } from "@/domain/ledger";
 import { centsToPlain, formatCents } from "@/domain/money";
 import { fmtDate, fmtDateTime } from "@/domain/period";
@@ -29,12 +30,13 @@ export function toCsv(rows: LedgerRow[], partnerBookings: PartnerBookingRow[] = 
     const safe = /^[=+\-@\t]/.test(s) && !/^-?\d/.test(s) ? `'${s}` : s;
     return /[;"]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
-  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Konto", "Kasse (EUR)", "Bank (EUR)", "Budget (EUR)", "Auslage-Anspruch (EUR)", "Kapital Partner (EUR)"];
+  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Konto", "Kasse (EUR)", "Bank (EUR)", "Budget (EUR)", "Auslage-Anspruch (EUR)", "Kapital Partner (EUR)", "Kategorie", "Bewegung (Kasse+Bank)"];
   const lines = [...rows].reverse().map((r) => [
     fmtDateTime(r.bookingDate), r.id, typeLabel(r), r.employeeName ?? "", r.description ?? "",
     r.receiptMerchant ?? "", r.invoiceNumber ?? "", r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Kasse" : "",
     centsToPlain(r.cashDeltaCents), centsToPlain(r.bankDeltaCents),
     centsToPlain(r.walletDeltaCents), centsToPlain(r.claimDeltaCents), centsToPlain(r.partnerDeltaCents),
+    r.category ? categoryLabel(r.category) : "", r.batchId ?? "",
   ].map(esc).join(";"));
   const partnerBlock = partnerBookings.length
     ? ["", ["Gesellschafter-Buchungen", "Datum", "Person", "Vorgang", "Herkunft / Konto", "Betrag (EUR)", "Wofür? / Begründung", "Beleg", "Erfasst von", "Status"].map(esc).join(";"),
@@ -85,6 +87,8 @@ export async function renderReportPdf(
       ["+ Manuelle Einnahmen", formatCents(s.pool.incomeManualCents)],
       ["– Budget-Zuteilungen (Mitarbeiter und Gesellschafter)", formatCents(s.pool.allocatedCents)],
       ["+ Budget-Rückführungen", formatCents(s.pool.returnedCents)],
+      ["– Betriebsausgaben (Kasse/Bank)", formatCents(s.pool.expenseCents)],
+      ["± Korrekturen, Gesellschafter, Erstattungen", formatCents(s.pool.otherCents)],
       ["= Rest-Kassenbestand (Ende)", formatCents(s.pool.closingCents)],
     ]);
     w.y -= 8;
@@ -92,6 +96,8 @@ export async function renderReportPdf(
     w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
       ["Belegte Ausgaben", formatCents(s.totals.receiptsCents)],
       ["Manuelle Ausgleiche (ohne Beleg)", formatCents(s.totals.adjustmentsCents)],
+      ...s.totals.expensesByCategory.map((c) => [`Betriebsausgabe: ${c.label}`, formatCents(c.cents)]),
+      ["Betriebsausgaben gesamt", formatCents(s.totals.expensesCents)],
     ]);
     w.y -= 8;
     w.paragraph(

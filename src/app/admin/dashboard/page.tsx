@@ -20,7 +20,7 @@ export default async function DashboardPage() {
         title={`Guten Tag, ${user.name.split(" ")[0]}`}
         actions={<>
           <ButtonLink href="/admin/invoices/new" variant="primary">Rechnung schreiben</ButtonLink>
-          <ButtonLink href="/admin/pool">Budget verteilen</ButtonLink>
+          <ButtonLink href="/admin/cash">Kasse &amp; Bank</ButtonLink>
         </>}
       />
 

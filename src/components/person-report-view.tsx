@@ -22,7 +22,7 @@ function AccountCard({ a }: { a: AccountBlock }) {
           <dt>{a.closingLabel}</dt><dd><Money cents={a.closingCents} /></dd>
         </div>
         {a.firmViewCents !== null && (
-          <div className="flex justify-between gap-3 text-amber-700">
+          <div className="flex justify-between gap-3 text-minus">
             <dt>Sicht der Firma: {a.firmViewLabel}</dt><dd><Money cents={a.firmViewCents} /></dd>
           </div>
         )}
@@ -112,7 +112,7 @@ export function PersonReportCard({ r, href }: { r: FullPersonReport; href: strin
         {r.accounts.map((a) => (
           <div key={a.key} className="flex justify-between gap-3">
             <dt className="text-muted">{a.key === "OUTLAY" ? "Firma schuldet (Auslagen)" : a.key === "BUDGET" ? "Restguthaben (Budget)" : "Kapitalkonto"}</dt>
-            <dd><Money cents={a.closingCents} className={a.key === "OUTLAY" && a.closingCents > 0 ? "text-amber-700" : ""} /></dd>
+            <dd><Money cents={a.closingCents} className={a.key === "OUTLAY" && a.closingCents > 0 ? "text-minus" : ""} /></dd>
           </div>
         ))}
       </dl>

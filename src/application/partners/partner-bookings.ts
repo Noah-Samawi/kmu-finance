@@ -1,28 +1,26 @@
 // Gesellschafter-Vorgänge: Mittelherkunft, Begründung, Verrechnungskonto "Vorgelegtes Geld",
 // gezielte Auslagen-Erstattung. Alles append-only, Korrektur nur per Storno.
-import { randomUUID } from "node:crypto";
 import { aliasedTable, and, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { ledgerEntries, partnerBookings, partnerOutlayRefunds, users } from "@/infrastructure/db/schema";
-import { blobToken, storage } from "@/infrastructure/storage";
-import { AppError, badRequest, forbidden, isAppError, notFound, rule } from "@/domain/errors";
+import { storage } from "@/infrastructure/storage";
+import { forbidden, isAppError, notFound, rule } from "@/domain/errors";
 import {
-  FUNDING_LABEL, PARTNER_KIND_LABEL, allowedSources, assertPurpose, isRefundable, partnerPosting, refundStatus, validateRefundAllocation,
+  FUNDING_LABEL, PARTNER_KIND_LABEL, allowedSources, assertPurpose, isPurchase, isRefundable, partnerPosting, refundStatus, validateRefundAllocation,
   type FundingSource, type PartnerKind, type RefundStatus,
 } from "@/domain/partner";
 import { dateInputToDate, todayKey } from "@/domain/period";
+import { assertCategory, categoryLabel } from "@/domain/cash";
 import { partnerBookSchema, partnerRefundSchema, partnerSelfBookSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import {
   audit, bankBalance, cashBalance, claimBalance, insertEntry, insufficient, loadPartner, partnerBalance, walletBalance,
 } from "../ledger-service";
-import { ALLOWED_MIME, resolveReceiptMime } from "../receipts/mime";
-import { parseReceiptDataUrl, toReceiptDataUrl } from "../receipts/inline-file";
+import { parseReceiptDataUrl } from "../receipts/inline-file";
+import { storeReceiptFile, type UploadFile } from "../receipts/store-file";
 import type { Range } from "../reports/reports";
-
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export interface PartnerBookingRow {
   id: string;
@@ -125,6 +123,7 @@ interface BookingInput {
   purpose: string;
   bookingDate?: string;
   receipt?: { key: string; mime: string; name: string } | null;
+  category?: string | null;
 }
 
 async function book(tx: Tx, ctx: Ctx, tenantId: string, partnerId: string, input: BookingInput) {
@@ -150,10 +149,13 @@ async function book(tx: Tx, ctx: Ctx, tenantId: string, partnerId: string, input
     if (w + deltas.walletDeltaCents < 0) throw insufficient("Budget / Vorschuss", w);
   }
 
+  const category = isPurchase(input.kind) ? assertCategory(input.category) : null;
   const bookingDate = input.bookingDate ? dateInputToDate(input.bookingDate) : new Date();
   const entry = await insertEntry(tx, ctx, tenantId, {
-    type, ...deltas, employeeId: partnerId, bookingDate,
-    description: [PARTNER_KIND_LABEL[input.kind], source && FUNDING_LABEL[source], input.purpose.trim()].filter(Boolean).join(" · "),
+    type, ...deltas, employeeId: partnerId, bookingDate, category,
+    description: [
+      PARTNER_KIND_LABEL[input.kind], source && FUNDING_LABEL[source], category && categoryLabel(category), input.purpose.trim(),
+    ].filter(Boolean).join(" · "),
   });
   const [b] = await tx.insert(partnerBookings).values({
     tenantId, partnerId, kind: input.kind, source, amountCents: input.amountCents, purpose: input.purpose.trim(),
@@ -161,7 +163,7 @@ async function book(tx: Tx, ctx: Ctx, tenantId: string, partnerId: string, input
     bookingDate, ledgerEntryId: entry.id, createdById: ctx.userId,
   }).returning();
   await audit(tx, ctx, "partner.booking", "PartnerBooking", b.id, {
-    partnerId, kind: input.kind, source, amountCents: input.amountCents, ledgerEntryId: entry.id, receipt: !!input.receipt,
+    partnerId, kind: input.kind, source, amountCents: input.amountCents, ledgerEntryId: entry.id, receipt: !!input.receipt, category,
   });
   return b;
 }
@@ -174,23 +176,8 @@ async function balances(tx: Tx, tenantId: string, partnerId: string) {
   };
 }
 
-/** Beleg speichern: mit Blob-Token im Dateispeicher, sonst als Data-URL in der Datenbank */
-export async function storePartnerReceipt(tenantId: string, partnerId: string, file: { data: Buffer; mime: string; name: string }) {
-  const mime = resolveReceiptMime(file.mime, file.data);
-  const ext = mime ? ALLOWED_MIME[mime] : undefined;
-  if (!mime || !ext) throw badRequest("Dateityp nicht erlaubt (JPG, PNG, WEBP, HEIC oder PDF)");
-  if (file.data.length === 0) throw badRequest("Datei ist leer");
-  if (file.data.length > MAX_FILE_BYTES) throw badRequest("Datei ist größer als 10 MB");
-  const name = (file.name || `beleg.${ext}`).replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 120);
-  if (!blobToken()) return { key: toReceiptDataUrl(mime, file.data), mime, name };
-  const key = `${tenantId}/partner-receipts/${partnerId}/${randomUUID()}.${ext}`;
-  try {
-    await storage.put(key, file.data, mime);
-  } catch (e) {
-    if (isAppError(e)) throw e;
-    throw new AppError(503, "STORAGE", "Beleg konnte nicht gespeichert werden");
-  }
-  return { key, mime, name };
+export async function storePartnerReceipt(tenantId: string, partnerId: string, file: UploadFile) {
+  return storeReceiptFile(tenantId, `partner-receipts/${partnerId}`, file);
 }
 
 /** Gesellschafter erfasst selbst: Einlage, Auslage oder Entnahme – Mittelherkunft Pflicht */

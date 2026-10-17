@@ -2,7 +2,8 @@
 import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
-import { invoices, ledgerEntries, periodClosings, receipts, users, type LedgerType } from "@/infrastructure/db/schema";
+import { invoices, ledgerAttachments, ledgerEntries, periodClosings, receipts, users, type LedgerType } from "@/infrastructure/db/schema";
+import { categoryLabel } from "@/domain/cash";
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "../context";
@@ -29,6 +30,7 @@ export interface LedgerRow {
   receiptId: string | null; receiptMerchant: string | null; receiptStatus: "SUBMITTED" | "APPROVED" | "REJECTED" | null;
   invoiceId: string | null; invoiceNumber: string | null;
   reversalOfId: string | null; reversedType: LedgerType | null; closingId: string | null;
+  category: string | null; batchId: string | null; attachmentId: string | null;
 }
 
 /** Buchungsliste mit Klartext-Infos (Mitarbeiter, Beleg, Rechnung) */
@@ -44,11 +46,13 @@ export async function ledgerRows(tx: Tx, tenantId: string, opts: { range?: Range
     receiptId: ledgerEntries.receiptId, receiptMerchant: receipts.merchant, receiptStatus: receipts.status,
     invoiceId: ledgerEntries.invoiceId, invoiceNumber: invoices.number,
     reversalOfId: ledgerEntries.reversalOfId, reversedType: reversed.type, closingId: ledgerEntries.closingId,
+    category: ledgerEntries.category, batchId: ledgerEntries.batchId, attachmentId: ledgerAttachments.id,
   }).from(ledgerEntries)
     .leftJoin(users, eq(users.id, ledgerEntries.employeeId))
     .leftJoin(receipts, eq(receipts.id, ledgerEntries.receiptId))
     .leftJoin(invoices, eq(invoices.id, ledgerEntries.invoiceId))
     .leftJoin(reversed, eq(reversed.id, ledgerEntries.reversalOfId))
+    .leftJoin(ledgerAttachments, eq(ledgerAttachments.ledgerEntryId, ledgerEntries.id))
     .where(and(
       eq(ledgerEntries.tenantId, tenantId),
       opts.employeeId ? eq(ledgerEntries.employeeId, opts.employeeId) : undefined,
@@ -66,6 +70,8 @@ export interface EmployeeSummary {
   employeeId: string; name: string;
   openingCents: number; allocatedCents: number; receiptsCents: number;
   adjustmentsCents: number; returnedCents: number; closingCents: number;
+  /** Einkäufe für die Firma aus dem Budget (Betriebsausgabe) */
+  expensesCents: number;
   claimOpeningCents: number; outlayCents: number; repayCents: number; claimClosingCents: number;
   firmBalanceCents: number;
 }
@@ -79,15 +85,29 @@ export interface PartnerSummary {
   budgetOpeningCents: number; budgetClosingCents: number;
   /** mit Firmenkarte oder aus der Kasse bezahlte Ausgaben */
   expenseCents: number;
+  /** Einkäufe für die Firma, vom Kapitalkonto verrechnet */
+  purchaseCapitalCents: number;
 }
 
 export interface Summary {
   from: string; to: string;
-  pool: { openingCents: number; incomeInvoiceCents: number; incomeManualCents: number; allocatedCents: number; returnedCents: number; closingCents: number };
+  pool: {
+    openingCents: number; incomeInvoiceCents: number; incomeManualCents: number; allocatedCents: number; returnedCents: number;
+    /** Betriebsausgaben direkt aus Kasse/Bank */
+    expenseCents: number;
+    /** Korrekturen, Gesellschafter-Vorgänge, Erstattungen (damit der Endbestand exakt aufgeht) */
+    otherCents: number;
+    closingCents: number;
+  };
   cash: { openingCents: number; closingCents: number };
   bank: { openingCents: number; closingCents: number };
   carryForward: { cashCents: number; bankCents: number; poolCents: number };
-  totals: { receiptsCents: number; adjustmentsCents: number; walletsOpenCents: number; claimsOpenCents: number };
+  totals: {
+    receiptsCents: number; adjustmentsCents: number; walletsOpenCents: number; claimsOpenCents: number;
+    /** alle Betriebsausgaben (Kasse, Bank, Budget, Kapital) */
+    expensesCents: number;
+    expensesByCategory: { category: string; label: string; cents: number }[];
+  };
   employees: EmployeeSummary[];
   partners: PartnerSummary[];
   entryCount: number;
@@ -125,6 +145,7 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
       receiptsCents: neg(sumWallet("RECEIPT", e.id)),
       adjustmentsCents: neg(sumWallet("ADJUSTMENT", e.id)),
       returnedCents: neg(sumWallet("RETURN", e.id)),
+      expensesCents: neg(sumWallet("EXPENSE", e.id)),
       closingCents: 0,
       claimOpeningCents: claimOpening,
       outlayCents: sumClaim("EMPLOYEE_OUTLAY", e.id),
@@ -132,10 +153,10 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
       claimClosingCents: 0,
       firmBalanceCents: 0,
     };
-    s.closingCents = s.openingCents + s.allocatedCents - s.receiptsCents - s.adjustmentsCents - s.returnedCents;
+    s.closingCents = s.openingCents + s.allocatedCents - s.receiptsCents - s.adjustmentsCents - s.returnedCents - s.expensesCents;
     s.claimClosingCents = s.claimOpeningCents + s.outlayCents - s.repayCents;
     s.firmBalanceCents = s.claimClosingCents - s.closingCents;
-    if (onlyEmployeeId || s.openingCents || s.closingCents || s.allocatedCents || s.receiptsCents || s.adjustmentsCents || s.returnedCents || s.claimOpeningCents || s.claimClosingCents) {
+    if (onlyEmployeeId || s.openingCents || s.closingCents || s.allocatedCents || s.receiptsCents || s.adjustmentsCents || s.returnedCents || s.expensesCents || s.claimOpeningCents || s.claimClosingCents) {
       employees.push(s);
     }
   }
@@ -162,12 +183,13 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
       outlayClosingCents: outlayOpening + mine.reduce((t, r) => t + r.claimDeltaCents, 0),
       budgetOpeningCents: budgetOpening,
       budgetClosingCents: budgetOpening + mine.reduce((t, r) => t + r.walletDeltaCents, 0),
-      expenseCents: neg(mine.filter((r) => effType(r) === "PARTNER_EXPENSE").reduce((t, r) => t + r.poolDeltaCents, 0)),
+      expenseCents: neg(mine.filter((r) => effType(r) === "PARTNER_EXPENSE" || effType(r) === "EXPENSE").reduce((t, r) => t + r.poolDeltaCents, 0)),
+      purchaseCapitalCents: neg(sumPartner("EXPENSE", p.id)),
     };
-    row.closingCents = row.openingCents + row.depositCents - row.drawCents + row.profitCents;
+    row.closingCents = row.openingCents + row.depositCents - row.drawCents + row.profitCents - row.purchaseCapitalCents;
     if (row.openingCents || row.closingCents || row.depositCents || row.drawCents || row.profitCents
       || row.outlayOpeningCents || row.outlayClosingCents || row.outlayCents || row.refundCents
-      || row.budgetOpeningCents || row.budgetClosingCents || row.expenseCents) partners.push(row);
+      || row.budgetOpeningCents || row.budgetClosingCents || row.expenseCents || row.purchaseCapitalCents) partners.push(row);
   }
 
   const poolOpening = onlyEmployeeId ? 0 : await poolBalance(tx, tenantId, range.start);
@@ -179,9 +201,24 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
     incomeManualCents: onlyEmployeeId ? 0 : sumPool("INCOME_MANUAL"),
     allocatedCents: onlyEmployeeId ? 0 : neg(sumPool("ALLOCATION")),
     returnedCents: onlyEmployeeId ? 0 : sumPool("RETURN"),
+    expenseCents: onlyEmployeeId ? 0 : neg(sumPool("EXPENSE")),
+    otherCents: 0,
     closingCents: 0,
   };
-  pool.closingCents = pool.openingCents + pool.incomeInvoiceCents + pool.incomeManualCents - pool.allocatedCents + pool.returnedCents;
+  const poolMove = onlyEmployeeId ? 0 : rows.reduce((s, r) => s + r.poolDeltaCents, 0);
+  const named = pool.incomeInvoiceCents + pool.incomeManualCents - pool.allocatedCents + pool.returnedCents - pool.expenseCents;
+  pool.otherCents = poolMove - named + 0;
+  pool.closingCents = pool.openingCents + poolMove;
+
+  const byCat = new Map<string, number>();
+  for (const r of rows) {
+    if (effType(r) !== "EXPENSE") continue;
+    const k = r.category ?? "SONSTIGES";
+    byCat.set(k, (byCat.get(k) ?? 0) - (r.poolDeltaCents + r.walletDeltaCents + r.partnerDeltaCents));
+  }
+  const expensesByCategory = [...byCat].filter(([, c]) => c !== 0)
+    .map(([category, cents]) => ({ category, label: categoryLabel(category), cents }))
+    .sort((a, b) => b.cents - a.cents);
   const cashMove = rows.reduce((s, r) => s + r.cashDeltaCents, 0);
   const bankMove = rows.reduce((s, r) => s + r.bankDeltaCents, 0);
 
@@ -195,6 +232,8 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
       adjustmentsCents: employees.reduce((s, e) => s + e.adjustmentsCents, 0),
       walletsOpenCents: employees.reduce((s, e) => s + e.closingCents, 0),
       claimsOpenCents: employees.reduce((s, e) => s + e.claimClosingCents, 0),
+      expensesCents: expensesByCategory.reduce((s, e) => s + e.cents, 0),
+      expensesByCategory,
     },
     employees,
     partners,

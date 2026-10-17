@@ -30,6 +30,24 @@ export async function recordEmployeeOutlay(ctx: Ctx, input: z.infer<typeof outla
   });
 }
 
+/** Admin bucht eine Auslage / Gutschrift für den Mitarbeiter (Firma schuldet ihm den Betrag) */
+export async function adminRecordOutlay(ctx: Ctx, employeeId: string, input: z.infer<typeof outlaySchema>) {
+  requireRole(ctx, "ADMIN");
+  const tenantId = tid(ctx);
+  if (input.bookingDate && input.bookingDate > todayKey()) throw rule("Buchungsdatum darf nicht in der Zukunft liegen");
+  return withTenant(ctx, async (tx) => {
+    await lockTenantLedger(tx, tenantId);
+    const emp = await loadEmployee(tx, tenantId, employeeId, { requireActive: false });
+    const entry = await insertEntry(tx, ctx, tenantId, {
+      type: "EMPLOYEE_OUTLAY", ...deltasFor("EMPLOYEE_OUTLAY", input.amountCents),
+      employeeId: emp.id, description: `${input.description} · erfasst durch Geschäftsführung`,
+      bookingDate: input.bookingDate && input.bookingDate !== todayKey() ? dateInputToDate(input.bookingDate) : new Date(),
+    });
+    await audit(tx, ctx, "outlay.recorded-by-admin", "LedgerEntry", entry.id, { employeeId: emp.id, amountCents: input.amountCents });
+    return { entry, claimBalanceCents: await claimBalance(tx, tenantId, emp.id) };
+  });
+}
+
 export async function repayOutlay(ctx: Ctx, employeeId: string, input: z.infer<typeof outlayRepaySchema>) {
   requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);

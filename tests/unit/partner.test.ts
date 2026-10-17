@@ -173,15 +173,15 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
     const { renderReportPdf } = await import("@/application/reports/export");
     const s: Summary = {
       from: "2026-10-01", to: "2026-10-11",
-      pool: { openingCents: 0, incomeInvoiceCents: 0, incomeManualCents: 0, allocatedCents: 200_000, returnedCents: 0, closingCents: -200_000 },
+      pool: { openingCents: 0, incomeInvoiceCents: 0, incomeManualCents: 0, allocatedCents: 200_000, returnedCents: 0, expenseCents: 4_990, otherCents: 0, closingCents: -204_990 },
       cash: { openingCents: 0, closingCents: 0 }, bank: { openingCents: 500_000, closingCents: 260_000 },
       carryForward: { cashCents: 0, bankCents: 500_000, poolCents: 0 },
-      totals: { receiptsCents: 0, adjustmentsCents: 0, walletsOpenCents: 0, claimsOpenCents: 0 },
+      totals: { receiptsCents: 0, adjustmentsCents: 0, walletsOpenCents: 0, claimsOpenCents: 0, expensesCents: 4_990, expensesByCategory: [{ category: "WAREN", label: "Wareneinkauf (Lebensmittel)", cents: 4_990 }] },
       employees: [],
       partners: [{
         partnerId: "p1", name: "Samir Haddad", openingCents: 0, depositCents: 0, drawCents: 0, profitCents: 0, closingCents: 0,
         outlayOpeningCents: 0, outlayCents: 100_000, refundCents: 40_000, outlayClosingCents: 60_000,
-        budgetOpeningCents: 0, budgetClosingCents: 200_000, expenseCents: 4_990,
+        budgetOpeningCents: 0, budgetClosingCents: 200_000, expenseCents: 4_990, purchaseCapitalCents: 0,
       }],
       entryCount: 0,
     };

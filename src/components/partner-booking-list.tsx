@@ -14,6 +14,7 @@ export function PartnerStatus({ b }: { b: PartnerBookingRow }) {
   if (b.status === "PARTIAL") return <Pill tone="amber">{t("pb.status.PARTIAL")} · {t("pb.openRest")} {formatCents(b.openCents)}</Pill>;
   if (b.status === "OPEN") return <Pill tone="red">{t("pb.status.OPEN")}</Pill>;
   if (b.kind === "OUTLAY") return <Pill>{t("pb.status.company")}</Pill>;
+  if (b.kind === "PURCHASE_CAPITAL" || b.kind === "PURCHASE_BUDGET") return <Pill tone="green">{t("pb.status.purchase")}</Pill>;
   return null;
 }
 
@@ -25,6 +26,7 @@ export function PartnerBookingList({ rows, showPartner }: { rows: PartnerBooking
     <ul className="divide-y divide-line">
       {rows.map((b) => {
         const outflow = b.kind === "DRAW" || b.kind === "OUTLAY_REFUND" || b.kind === "BUDGET"
+          || b.kind === "PURCHASE_CAPITAL" || b.kind === "PURCHASE_BUDGET"
           || (b.kind === "OUTLAY" && b.source !== "PRIVATE");
         return (
           <li key={b.id} className={`flex items-start gap-3 px-4 py-3 md:px-5 ${b.reversed ? "opacity-60" : ""}`}>

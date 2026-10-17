@@ -54,6 +54,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
             <Row label="+ Erhalten" cents={e.allocatedCents} />
             <Row label="− Belege" cents={e.receiptsCents} />
             <Row label="− Ausgleich durch Chef" cents={e.adjustmentsCents} />
+            <Row label="− Einkäufe für die Firma" cents={e.expensesCents} />
             <Row label="− Zurückgegeben" cents={e.returnedCents} />
             <div className="flex justify-between border-t border-ink/70 pt-1.5 font-semibold"><dt>Restbetrag</dt><dd>{formatCents(e.closingCents)}</dd></div>
           </dl>

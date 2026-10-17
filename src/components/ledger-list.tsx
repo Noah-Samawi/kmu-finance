@@ -3,6 +3,7 @@ import type { LedgerRow } from "@/application/reports/reports";
 import { LEDGER_LABEL } from "@/domain/ledger";
 import { fmtDateTime } from "@/domain/period";
 import { DIRECTLY_REVERSIBLE } from "@/domain/ledger";
+import { categoryLabel } from "@/domain/cash";
 import { Empty, Money, Pill } from "./ui";
 import { ReverseButton } from "./reverse-button";
 
@@ -32,6 +33,8 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds }: {
               {r.receiptStatus === "APPROVED" && <Pill tone="green">geprüft</Pill>}
               {reversed.has(r.id) && r.type !== "RECEIPT" && <Pill>storniert</Pill>}
               {r.closingId && <Pill>abgeschlossen</Pill>}
+              {r.category && <Pill tone="amber">{categoryLabel(r.category)}</Pill>}
+              {r.batchId && <Pill>Tageseinnahme Kasse + Bank</Pill>}
             </p>
             <p className="truncate text-sm text-muted">
               {r.invoiceNumber && admin && r.invoiceId ? (
@@ -43,7 +46,12 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds }: {
                 [showEmployee && r.employeeName, r.description].filter(Boolean).join(" – ")
               )}
             </p>
-            <p className="text-xs text-muted">{fmtDateTime(r.bookingDate)}</p>
+            <p className="text-xs text-muted">
+              {fmtDateTime(r.bookingDate)}
+              {r.attachmentId && (
+                <> · <a className="text-ledger underline-offset-2 hover:underline" href={`/api/v1/ledger/${r.id}/attachment`} target="_blank" rel="noreferrer">Beleg ansehen</a></>
+              )}
+            </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1 text-right">
             {(mode === "pool" || mode === "both") && r.poolDeltaCents !== 0 && (

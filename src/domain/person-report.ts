@@ -46,7 +46,7 @@ export interface TransferRow {
   id: string;
   date: Date;
   /** aus Sicht der Firma */
-  direction: "TO_PERSON" | "FROM_PERSON" | "COMPANY_EXPENSE";
+  direction: "TO_PERSON" | "FROM_PERSON" | "COMPANY_EXPENSE" | "COMPANY_INCOME";
   directionLabel: string;
   account: AccountKind;
   accountLabel: string;
@@ -138,6 +138,7 @@ export function buildPersonReport(input: {
       ...split("+ Erhalten von der Firma", "walletDeltaCents", rows, ["ALLOCATION"]),
       { label: "− Ausgaben mit Beleg", cents: sum(rows, "walletDeltaCents", ["RECEIPT"]) },
       { label: "− Ausgaben ohne Beleg / Ausgleich", cents: sum(rows, "walletDeltaCents", ["ADJUSTMENT"]) },
+      { label: "− Einkäufe für die Firma (aus Budget)", cents: sum(rows, "walletDeltaCents", ["EXPENSE"]) },
       ...split("− An die Firma zurückgegeben", "walletDeltaCents", rows, ["RETURN"]),
     ],
     `Restbetrag bei ${name}`,
@@ -158,14 +159,15 @@ export function buildPersonReport(input: {
 
   const accounts = [budget, outlay];
   if (person.role === "PARTNER") {
-    accounts.push(block("CAPITAL", "Kapitalkonto", "Einlagen − Entnahmen + Gewinnanteile",
+    accounts.push(block("CAPITAL", "Kapitalkonto", "Einlagen − Entnahmen + Gewinnanteile − Einkäufe für die Firma",
       opening.capitalCents,
       [
         ...split("+ Einlagen", "partnerDeltaCents", rows, ["PARTNER_DEPOSIT"]),
         ...split("− Entnahmen", "partnerDeltaCents", rows, ["PARTNER_DRAW"]),
         { label: "+ Gewinnanteile", cents: sum(rows, "partnerDeltaCents", ["PARTNER_PROFIT"]) },
+        { label: "− Einkäufe für die Firma (vom Kapital)", cents: sum(rows, "partnerDeltaCents", ["EXPENSE"]) },
       ],
-      "Kapitalkonto Ende",
+      `Restguthaben Kapitalkonto ${name}`,
     ));
   }
 
@@ -175,13 +177,18 @@ export function buildPersonReport(input: {
       const account: AccountKind = r.bankDeltaCents !== 0 ? "BANK" : "CASH";
       const delta = r.cashDeltaCents + r.bankDeltaCents;
       const t = effType(r);
-      const direction: TransferRow["direction"] = t === "PARTNER_EXPENSE" ? "COMPANY_EXPENSE" : delta < 0 ? "TO_PERSON" : "FROM_PERSON";
-      const fromFirm = delta < 0;
+      const direction: TransferRow["direction"] = t === "PARTNER_EXPENSE" || t === "EXPENSE" ? "COMPANY_EXPENSE"
+        : t === "INCOME_MANUAL" || t === "INCOME_INVOICE" ? "COMPANY_INCOME"
+        : delta < 0 ? "TO_PERSON" : "FROM_PERSON";
+      const DIRECTION_LABEL: Record<TransferRow["direction"], string> = {
+        COMPANY_EXPENSE: `Firmenmittel, ausgegeben von ${name}`,
+        COMPANY_INCOME: `Einnahme über ${name} → Firmenkonto`,
+        TO_PERSON: `Firma → ${name}`,
+        FROM_PERSON: `${name} → Firma`,
+      };
       return {
         id: r.id, date: r.bookingDate, direction,
-        directionLabel: direction === "COMPANY_EXPENSE"
-          ? `Firmenmittel, ausgegeben von ${name}`
-          : fromFirm ? `Firma → ${name}` : `${name} → Firma`,
+        directionLabel: DIRECTION_LABEL[direction],
         account, accountLabel: ACCOUNT_LABEL[account],
         amountCents: Math.abs(delta), kind: kindLabel(r), purpose: r.description ?? "",
         reversed: reversedIds.has(r.id), isReversal: r.type === "REVERSAL",
@@ -221,6 +228,16 @@ export function buildPersonReport(input: {
   } else if (outlay.inCents || outlay.outCents) {
     statements.push(`Alle Auslagen von ${name} sind erstattet.`);
   }
+  const capital = accounts.find((a) => a.key === "CAPITAL");
+  if (capital && (capital.openingCents || capital.inCents || capital.outCents)) {
+    const bought = -sum(rows, "partnerDeltaCents", ["EXPENSE"]);
+    statements.push(`Restguthaben Kapitalkonto ${name}: ${formatCents(capital.closingCents)}${bought > 0 ? ` – davon ${formatCents(bought)} für Einkäufe der Firma verrechnet` : ""}.`);
+  }
+  const live = transfers.filter((x) => !x.reversed && !x.isReversal);
+  const spent = live.filter((x) => x.direction === "COMPANY_EXPENSE").reduce((v, x) => v + x.amountCents, 0);
+  if (spent) statements.push(`${name} hat ${formatCents(spent)} Firmenmittel (Kasse/Bank) für die Firma ausgegeben.`);
+  const earned = live.filter((x) => x.direction === "COMPANY_INCOME").reduce((v, x) => v + x.amountCents, 0);
+  if (earned) statements.push(`Über ${name} vereinnahmt: ${formatCents(earned)} – direkt auf Kasse/Bankkonto der Firma, kein Guthaben der Person.`);
   if (!statements.length) statements.push(`Keine Bewegungen und keine offenen Beträge für ${name} im Zeitraum.`);
 
   return { person, from: input.from, to: input.to, accounts, transfers, movements, statements };

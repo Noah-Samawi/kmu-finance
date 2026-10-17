@@ -144,6 +144,8 @@ export interface NewEntry {
   reversalOfId?: string | null;
   description?: string | null;
   bookingDate?: Date;
+  category?: string | null;
+  batchId?: string | null;
 }
 
 export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntry) {

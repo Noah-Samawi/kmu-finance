@@ -15,12 +15,18 @@ export const FUNDING_SOURCES: FundingSource[] = ["PRIVATE", "BANK", "CASH"];
 export type PartnerKind =
   | "DEPOSIT" | "OUTLAY" | "DRAW" | "PROFIT"
   | "BUDGET" | "BUDGET_RETURN" | "BUDGET_SETTLED"
-  | "OUTLAY_REFUND";
+  | "OUTLAY_REFUND"
+  | "PURCHASE_CAPITAL" | "PURCHASE_BUDGET";
 
 /** Vorgänge, die ein Gesellschafter selbst erfassen darf */
 export const SELF_KINDS = ["DEPOSIT", "OUTLAY", "DRAW"] as const;
 /** Vorgänge über das allgemeine Admin-Buchungsformular (Erstattung hat einen eigenen Ablauf) */
-export const ADMIN_KINDS = ["DEPOSIT", "OUTLAY", "DRAW", "PROFIT", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED"] as const;
+export const ADMIN_KINDS = [
+  "DEPOSIT", "OUTLAY", "PURCHASE_CAPITAL", "PURCHASE_BUDGET", "DRAW", "PROFIT", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED",
+] as const;
+/** Einkauf für die Firma, verrechnet mit einem Personenkonto – wird als Betriebsausgabe (mit Kategorie) gebucht */
+export const PURCHASE_KINDS = ["PURCHASE_CAPITAL", "PURCHASE_BUDGET"] as const;
+export const isPurchase = (k: PartnerKind) => k === "PURCHASE_CAPITAL" || k === "PURCHASE_BUDGET";
 
 export const FUNDING_LABEL: Record<FundingSource, string> = {
   PRIVATE: "Eigene Tasche / Privat",
@@ -37,6 +43,8 @@ export const PARTNER_KIND_LABEL: Record<PartnerKind, string> = {
   BUDGET_RETURN: "Budget-Rückgabe",
   BUDGET_SETTLED: "Budget verbraucht (abgerechnet)",
   OUTLAY_REFUND: "Auslagen-Erstattung",
+  PURCHASE_CAPITAL: "Einkauf für die Firma – vom Kapitalkonto",
+  PURCHASE_BUDGET: "Einkauf für die Firma – aus Budget / Vorschuss",
 };
 
 /** Ohne Beleg muss die Begründung aussagekräftig sein */
@@ -64,6 +72,8 @@ export function allowedSources(kind: PartnerKind): FundingSource[] | null {
       return ["BANK", "CASH"];
     case "PROFIT":
     case "BUDGET_SETTLED":
+    case "PURCHASE_CAPITAL":
+    case "PURCHASE_BUDGET":
       return null;
   }
 }
@@ -122,6 +132,11 @@ export function partnerPosting(kind: PartnerKind, source: FundingSource | null, 
       return { type: "ADJUSTMENT", deltas: { ...none, walletDeltaCents: -a, accountKind: null } };
     case "OUTLAY_REFUND":
       return { type: "PARTNER_OUTLAY_REFUND", deltas: { ...none, ...account(-a, src!), claimDeltaCents: -a } };
+    // Betriebsausgabe, sofort vom Guthaben abgezogen – kein Kassen-/Bankabgang
+    case "PURCHASE_CAPITAL":
+      return { type: "EXPENSE", deltas: { ...none, partnerDeltaCents: -a, accountKind: null } };
+    case "PURCHASE_BUDGET":
+      return { type: "EXPENSE", deltas: { ...none, walletDeltaCents: -a, accountKind: null } };
   }
 }
 

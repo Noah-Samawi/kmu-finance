@@ -76,6 +76,8 @@ export function partnerStatusText(b: PartnerBookingRow): string {
     return b.status === "PARTIAL" ? `${base}, offen ${formatCents(b.openCents)}` : `${base} (${formatCents(b.openCents)})`;
   }
   if (b.kind === "OUTLAY") return "Firmenmittel – keine Erstattung";
+  if (b.kind === "PURCHASE_CAPITAL") return "Betriebsausgabe – vom Kapitalkonto abgezogen";
+  if (b.kind === "PURCHASE_BUDGET") return "Betriebsausgabe – vom Budget abgezogen";
   return "gebucht";
 }
 

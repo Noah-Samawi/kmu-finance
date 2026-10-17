@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { parseEuroToCents } from "@/domain/money";
 import { parseVatRate } from "@/domain/invoice";
+import { EXPENSE_CATEGORY_KEYS, type ExpenseCategory } from "@/domain/cash";
 
 // Gemeinsame Zod-Schemas für Client und Server.
 
@@ -91,12 +92,20 @@ const fundingSource = z.enum(["PRIVATE", "BANK", "CASH"], {
 const purpose = z.string().trim().min(3, "Wofür? / Begründung fehlt").max(500);
 
 /** Admin: Gesellschafter-Vorgang buchen (Erstattung läuft separat über partnerRefundSchema) */
+export const expenseCategory = z.enum(EXPENSE_CATEGORY_KEYS as [ExpenseCategory, ...ExpenseCategory[]], {
+  errorMap: () => ({ message: "Bitte Kategorie auswählen" }),
+});
+
 export const partnerBookSchema = z.object({
-  kind: z.enum(["DEPOSIT", "OUTLAY", "DRAW", "PROFIT", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED"]),
+  kind: z.enum([
+    "DEPOSIT", "OUTLAY", "PURCHASE_CAPITAL", "PURCHASE_BUDGET", "DRAW", "PROFIT", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED",
+  ]),
   source: fundingSource.optional().nullable(),
   amountCents: positiveAmount,
   purpose,
   bookingDate: dateStr.optional(),
+  /** Pflicht bei Einkäufen für die Firma */
+  category: expenseCategory.optional().nullable(),
 });
 
 /** Gesellschafter: eigene Einlage, Auslage oder Entnahme (Mittelherkunft Pflicht) */
@@ -204,6 +213,55 @@ export const incomeSchema = z.object({
   description: z.string().trim().min(2).max(300),
   bookingDate: dateStr.optional(),
   accountKind,
+});
+
+/** leere Eingabe = kein Betrag */
+const optionalAmount = z.union([z.number().int(), z.string(), z.null()]).optional().transform((v, ctx) => {
+  if (v === undefined || v === null || (typeof v === "string" && v.trim() === "")) return null;
+  try {
+    const n = typeof v === "number" ? v : parseEuroToCents(v);
+    if (n < 0) throw new Error("Betrag darf nicht negativ sein");
+    if (n > 1_000_000_000) throw new Error("Betrag zu hoch (max. 10 Mio. €)");
+    return n;
+  } catch (e) {
+    ctx.addIssue({ code: "custom", message: (e as Error).message });
+    return z.NEVER;
+  }
+});
+const personId = z.string().trim().optional().nullable().transform((v) => v || null);
+
+/** Tageseinnahme: Kasse und/oder Bank in einem Schritt */
+export const dailyIncomeSchema = z.object({
+  bookingDate: dateStr,
+  cashCents: optionalAmount,
+  bankCents: optionalAmount,
+  description: z.string().trim().min(2, "Wofür? fehlt").max(300),
+  personId,
+});
+
+/** Betriebsausgabe (Gastro): Herkunft Kasse/Bank oder Budget einer Person */
+export const expenseSchema = z.object({
+  fund: z.enum(["CASH", "BANK", "BUDGET"], { errorMap: () => ({ message: "Bitte Herkunftskonto wählen" }) }),
+  category: expenseCategory,
+  amountCents: positiveAmount,
+  purpose: z.string().trim().min(3, "Wofür? / Begründung fehlt").max(500),
+  bookingDate: dateStr.optional(),
+  personId,
+});
+
+/** Bestandskorrektur zum Stichtag: neuer Ist-Bestand statt Differenz */
+export const balanceCorrectionSchema = z.object({
+  accountKind: z.enum(["CASH", "BANK"]),
+  date: dateStr,
+  actualCents: z.union([z.number().int(), z.string()]).transform((v, ctx) => {
+    try {
+      return typeof v === "number" ? v : parseEuroToCents(v);
+    } catch (e) {
+      ctx.addIssue({ code: "custom", message: (e as Error).message });
+      return z.NEVER;
+    }
+  }),
+  description: z.string().trim().min(10, "Begründung Pflicht (mindestens 10 Zeichen)").max(500),
 });
 
 export const allocationSchema = z.object({
