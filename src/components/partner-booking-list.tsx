@@ -6,6 +6,8 @@ import { fmtDate } from "@/domain/period";
 import type { MsgKey } from "@/lib/i18n";
 import { useT } from "./i18n";
 import { Empty, Money, Pill } from "./ui";
+import { EntryActions } from "./entry-actions";
+import type { BranchOption } from "./branch-category";
 
 export function PartnerStatus({ b }: { b: PartnerBookingRow }) {
   const t = useT();
@@ -19,7 +21,9 @@ export function PartnerStatus({ b }: { b: PartnerBookingRow }) {
 }
 
 /** Gesellschafter-Vorgänge: Person, Herkunft, Betrag, Zweck und Erstattungsstatus */
-export function PartnerBookingList({ rows, showPartner }: { rows: PartnerBookingRow[]; showPartner?: boolean }) {
+export function PartnerBookingList({ rows, showPartner, admin, branches }: {
+  rows: PartnerBookingRow[]; showPartner?: boolean; admin?: boolean; branches?: BranchOption[];
+}) {
   const t = useT();
   if (!rows.length) return <Empty title={t("pb.empty")} />;
   return (
@@ -35,6 +39,8 @@ export function PartnerBookingList({ rows, showPartner }: { rows: PartnerBooking
                 {showPartner && <span>{b.partnerName} ·</span>}
                 {t(`pb.kind.${b.kind}` as MsgKey)}
                 <PartnerStatus b={b} />
+                {b.branchName && <Pill tone="green">{b.branchName}</Pill>}
+                {b.editedFromCents != null && <Pill>{`geändert (vorher ${formatCents(b.editedFromCents)})`}</Pill>}
               </p>
               <p className="text-sm text-muted" dir="auto">{b.purpose}</p>
               <p className="flex flex-wrap gap-x-2 text-xs text-muted">
@@ -51,7 +57,13 @@ export function PartnerBookingList({ rows, showPartner }: { rows: PartnerBooking
                 </p>
               )}
             </div>
-            <Money cents={outflow ? -b.amountCents : b.amountCents} signed className="shrink-0 font-semibold" />
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Money cents={outflow ? -b.amountCents : b.amountCents} signed className="font-semibold" />
+              {admin && !b.reversed && b.refundedCents === 0 && (
+                <EntryActions id={b.ledgerEntryId} amountCents={b.amountCents} description={b.purpose} branchId={b.branchId}
+                  branches={branches} canEdit={b.kind !== "OUTLAY_REFUND"} />
+              )}
+            </div>
           </li>
         );
       })}

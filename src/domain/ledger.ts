@@ -1,4 +1,5 @@
 import type { AccountKind } from "./accounts";
+import { rule } from "./errors";
 
 export type LedgerType =
   | "INCOME_INVOICE" | "INCOME_MANUAL" | "ALLOCATION"
@@ -92,6 +93,29 @@ export const DIRECTLY_REVERSIBLE: LedgerType[] = [
   "EMPLOYEE_OUTLAY", "OUTLAY_REPAY", "PARTNER_DEPOSIT", "PARTNER_DRAW", "PARTNER_PROFIT",
   "PARTNER_OUTLAY", "PARTNER_OUTLAY_REFUND", "PARTNER_EXPENSE", "EXPENSE",
 ];
+
+type DeltaKey = "poolDeltaCents" | "walletDeltaCents" | "cashDeltaCents" | "bankDeltaCents" | "claimDeltaCents" | "partnerDeltaCents";
+const DELTA_KEYS: DeltaKey[] = ["poolDeltaCents", "walletDeltaCents", "cashDeltaCents", "bankDeltaCents", "claimDeltaCents", "partnerDeltaCents"];
+
+/** Betrag einer Buchung = größte Kontowirkung (alle Teilwirkungen sind ±Betrag oder 0) */
+export function entryAmount(e: Deltas): number {
+  return Math.max(...DELTA_KEYS.map((k) => Math.abs(e[k] ?? 0)));
+}
+
+/**
+ * Ändern einer Buchung: alle Kontowirkungen mit dem neuen Betrag (gleiche Vorzeichen, gleiche Konten).
+ * Nur möglich, wenn jede Teilwirkung genau ±Betrag ist (bei allen Standard-Buchungsarten der Fall).
+ */
+export function rescaleDeltas(e: Deltas, newAmountCents: number): Deltas {
+  if (!Number.isInteger(newAmountCents) || newAmountCents <= 0) throw rule("Neuer Betrag muss größer als 0 sein");
+  const old = entryAmount(e);
+  if (!old || DELTA_KEYS.some((k) => (e[k] ?? 0) !== 0 && Math.abs(e[k] ?? 0) !== old)) {
+    throw rule("Diese Buchung lässt sich nicht im Betrag ändern – bitte stornieren und neu erfassen");
+  }
+  const out = { accountKind: e.accountKind ?? null } as Deltas;
+  for (const k of DELTA_KEYS) out[k] = Math.sign(e[k] ?? 0) * newAmountCents + 0;
+  return out;
+}
 
 export function assertNonNegative(balanceAfter: number, msg: string) {
   if (balanceAfter < 0) throw new RangeError(msg);

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { listPartners } from "@/application/partners/partners";
 import { poolOverview } from "@/application/pool/pool";
+import { listBranches } from "@/application/branches/branches";
 import { todayKey } from "@/domain/period";
 import { Empty, Money, PageHeader, Pill, Section } from "@/components/ui";
 import { PartnerBookingList } from "@/components/partner-booking-list";
@@ -12,7 +13,7 @@ export const metadata: Metadata = { title: "Partner & Gesellschafter" };
 
 export default async function PartnersPage() {
   const user = await requireUser("ADMIN");
-  const [partners, pool] = await Promise.all([listPartners(user), poolOverview(user)]);
+  const [partners, pool, branches] = await Promise.all([listPartners(user), poolOverview(user), listBranches(user)]);
   const today = todayKey();
   return (
     <>
@@ -41,11 +42,11 @@ export default async function PartnersPage() {
                       <div><dt className="text-xs text-muted">Budget / Vorschuss</dt><dd><Money cents={p.budgetCents} className="font-semibold" /></dd></div>
                     </dl>
                   </div>
-                  <PartnerForms partner={p} today={today} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
+                  <PartnerForms partner={p} today={today} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} branches={branches} />
                 </div>
                 <div className="border-t border-line">
                   <p className="px-4 pt-3 text-sm font-medium md:px-5">Buchungen (Herkunft, Zweck, Status)</p>
-                  <PartnerBookingList rows={p.bookings.slice(0, 30)} />
+                  <PartnerBookingList rows={p.bookings.slice(0, 30)} admin branches={branches} />
                 </div>
               </Section>
             ))

@@ -14,6 +14,7 @@ const NAV: readonly { href: string; label: MsgKey; badgeKey?: "receipts" }[] = [
   { href: "/admin/contacts", label: "nav.contacts" },
   { href: "/admin/cash", label: "nav.pool" },
   { href: "/admin/bank", label: "nav.bank" },
+  { href: "/admin/branches", label: "nav.branches" },
   { href: "/admin/employees", label: "nav.employees" },
   { href: "/admin/partners", label: "nav.partners" },
   { href: "/admin/briefkopf", label: "nav.letterhead" },

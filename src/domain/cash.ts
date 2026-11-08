@@ -11,6 +11,7 @@ export const EXPENSE_CATEGORIES = {
   VERPACKUNG: "Verpackung & Einweg",
   REINIGUNG: "Reinigung & Hygiene",
   ENERGIE: "Energie (Strom, Gas, Wasser)",
+  LOHN: "Lohn für Mitarbeiter",
   MIETE: "Miete & Nebenkosten",
   REPARATUR: "Reparatur & Instandhaltung",
   AUSSTATTUNG: "Küchen- & Betriebsausstattung",
@@ -21,8 +22,22 @@ export const EXPENSE_CATEGORIES = {
 export type ExpenseCategory = keyof typeof EXPENSE_CATEGORIES;
 export const EXPENSE_CATEGORY_KEYS = Object.keys(EXPENSE_CATEGORIES) as ExpenseCategory[];
 
+/** Feste Kategorie (Schlüssel) oder eigene Freitext-Kategorie (wird als Text gespeichert) */
 export const categoryLabel = (c: string | null | undefined) =>
-  c && c in EXPENSE_CATEGORIES ? EXPENSE_CATEGORIES[c as ExpenseCategory] : "Ohne Kategorie";
+  !c ? "Ohne Kategorie" : c in EXPENSE_CATEGORIES ? EXPENSE_CATEGORIES[c as ExpenseCategory] : c;
+
+export const isFixedCategory = (c: string | null | undefined): c is ExpenseCategory => !!c && c in EXPENSE_CATEGORIES;
+
+/** Eingabe normalisieren: Schlüssel, Label einer festen Kategorie oder eigener Freitext (2–40 Zeichen) */
+export function normalizeCategory(c: string | null | undefined): string | null {
+  const v = (c ?? "").replace(/\s+/g, " ").trim();
+  if (!v) return null;
+  if (isFixedCategory(v)) return v;
+  const byLabel = EXPENSE_CATEGORY_KEYS.find((k) => EXPENSE_CATEGORIES[k].toLowerCase() === v.toLowerCase());
+  if (byLabel) return byLabel;
+  if (v.length < 2 || v.length > 40) throw rule("Eigene Kategorie: 2 bis 40 Zeichen");
+  return v;
+}
 
 /** Woraus wird eine Ausgabe bezahlt? */
 export type ExpenseFund = "CASH" | "BANK" | "BUDGET" | "CAPITAL";
@@ -56,9 +71,30 @@ export function expenseDeltas(fund: ExpenseFund, amountCents: number): Deltas {
   }
 }
 
-export function assertCategory(c: string | null | undefined): ExpenseCategory {
-  if (!c || !(c in EXPENSE_CATEGORIES)) throw rule("Bitte Kategorie auswählen");
-  return c as ExpenseCategory;
+export function assertCategory(c: string | null | undefined): string {
+  const v = normalizeCategory(c);
+  if (!v) throw rule("Bitte Kategorie auswählen oder eigene Kategorie eingeben");
+  return v;
+}
+
+/** Kategorie-Vorschlag aus Händler-/Buchungstext (OCR, Kontoauszug) */
+const CATEGORY_HINTS: [RegExp, ExpenseCategory][] = [
+  [/\b(lohn|gehalt|gehälter|salary|payroll|minijob|aushilfe)\b/i, "LOHN"],
+  [/\b(metro|selgros|transgourmet|edeka|rewe|lidl|aldi|kaufland|penny|netto|großhandel|grosshandel|fleisch|gemüse|gemuese|bäckerei|baeckerei|lebensmittel|halal)\b/i, "WAREN"],
+  [/\b(getränke|getraenke|coca|pepsi|brauerei|bier|wasser\s*lieferung|getränkemarkt)\b/i, "GETRAENKE"],
+  [/\b(stadtwerke|strom|gas|energie|eon|e\.on|vattenfall|enbw|mainova|süwag|suewag|wasserwerk)\b/i, "ENERGIE"],
+  [/\b(miete|pacht|nebenkosten|hausverwaltung|vermieter)\b/i, "MIETE"],
+  [/\b(verpackung|einweg|alufolie|servietten|boxen)\b/i, "VERPACKUNG"],
+  [/\b(reinigung|hygiene|putzmittel|desinfektion|handtuch)\b/i, "REINIGUNG"],
+  [/\b(reparatur|handwerker|wartung|instandhaltung|ersatzteil)\b/i, "REPARATUR"],
+  [/\b(ikea|bauhaus|obi|hornbach|media\s*markt|saturn|küche|kueche|gastro\s*bedarf|ausstattung)\b/i, "AUSSTATTUNG"],
+  [/\b(versicherung|gebühr|gebuehr|kontoführung|kontofuehrung|ihk|gez|rundfunk|steuerberater|finanzamt)\b/i, "GEBUEHREN"],
+  [/\b(werbung|marketing|flyer|google\s*ads|facebook|instagram|lieferando|wolt|uber\s*eats)\b/i, "MARKETING"],
+];
+
+export function guessCategory(text: string): ExpenseCategory | null {
+  for (const [re, cat] of CATEGORY_HINTS) if (re.test(text)) return cat;
+  return null;
 }
 
 /** Tageseinnahme: Kasse und/oder Bank – mindestens ein Betrag > 0 */
@@ -126,15 +162,32 @@ export interface AccountFlow {
   correctionCents: number;
   /** Gesellschafter-Einlagen/-Entnahmen, Erstattungen, ± */
   otherCents: number;
+  /** Stornos von Buchungen außerhalb des Zeitraums (z. B. heute storniert, gebucht an einem Vortag), ± */
+  priorReversalCents: number;
   closingCents: number;
 }
 
+/** Storno einer Buchung, die NICHT im betrachteten Zeitraum liegt */
+export const PRIOR_REVERSAL = "REVERSAL_PRIOR";
+
 export interface FlowRow { type: string; cashDeltaCents: number; bankDeltaCents: number }
+
+/**
+ * Wirksamer Typ für Auswertungen: Ein Storno zählt zum Typ des Originals, wenn das Original im Zeitraum liegt
+ * (Einnahme − Storno = netto). Liegt das Original davor, erscheint es als eigene Zeile "Stornos früherer Buchungen",
+ * damit Einnahmen nie negativ und nie als Ausgabe ausgewiesen werden.
+ */
+export function flowType(
+  r: { type: string; reversalOfId?: string | null; reversedType?: string | null }, inRange: Set<string>,
+): string {
+  if (r.type !== "REVERSAL") return r.type;
+  return r.reversalOfId && inRange.has(r.reversalOfId) && r.reversedType ? r.reversedType : PRIOR_REVERSAL;
+}
 
 export function accountFlow(account: AccountKind, openingCents: number, rows: FlowRow[]): AccountFlow {
   const f: AccountFlow = {
     openingCents, dailyIncomeCents: 0, invoiceIncomeCents: 0, expenseCents: 0, allocatedCents: 0,
-    returnedCents: 0, transferCents: 0, correctionCents: 0, otherCents: 0, closingCents: openingCents,
+    returnedCents: 0, transferCents: 0, correctionCents: 0, otherCents: 0, priorReversalCents: 0, closingCents: openingCents,
   };
   for (const r of rows) {
     const d = account === "CASH" ? r.cashDeltaCents : r.bankDeltaCents;
@@ -147,6 +200,7 @@ export function accountFlow(account: AccountKind, openingCents: number, rows: Fl
       case "RETURN": f.returnedCents += d; break;
       case "CASH_WITHDRAWAL": f.transferCents += d; break;
       case "ACCOUNT_ADJUST": f.correctionCents += d; break;
+      case PRIOR_REVERSAL: f.priorReversalCents += d; break;
       default: f.otherCents += d;
     }
     f.closingCents += d;
@@ -171,6 +225,7 @@ export function accountFlowLines(account: AccountKind, f: AccountFlow): FlowLine
     ...optional(account === "CASH" ? "± Umbuchung vom Bankkonto (Abhebung)" : "± Umbuchung in die Kasse (Abhebung)", f.transferCents),
     ...optional("± Bestandskorrekturen", f.correctionCents),
     ...optional("± Gesellschafter & Erstattungen", f.otherCents),
+    ...optional("± Stornos früherer Buchungen", f.priorReversalCents),
     { label: `= Endbestand ${name}`, cents: f.closingCents, strong: true },
   ];
 }

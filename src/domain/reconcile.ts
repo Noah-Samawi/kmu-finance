@@ -1,3 +1,4 @@
+import { guessCategory } from "./cash";
 import { parseEuroToCents } from "./money";
 
 export interface ParsedBankLine {
@@ -85,13 +86,58 @@ export function parseBankOfx(text: string): ParsedBankLine[] {
   return lines;
 }
 
-export function parseBankFile(filename: string, mime: string, data: Buffer): ParsedBankLine[] {
+const PDF_LINE = /^(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)\s+(?:(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)\s+)?(.*?)\s*([+-]\s?)?(\d{1,3}(?:\.\d{3})*,\d{2})\s*(-|\+|S|H)?$/;
+const PDF_SKIP = /\b(saldo|kontostand|übertrag|uebertrag|summe\s+(soll|haben)|seite\s+\d)/i;
+const OUTGOING_HINT = /\b(lastschrift|abbuchung|überweisung\s+an|ueberweisung\s+an|kartenzahlung|kartenumsatz|entgelt|gebühr|gebuehr|dauerauftrag|auszahlung|geldautomat)\b/i;
+
+/**
+ * Kontoauszug als PDF: Text (zeilenweise aus der PDF-Textebene) → Umsätze.
+ * Erkennt "TT.MM.(JJJJ) [Valuta] Text Betrag" mit Vorzeichen, nachgestelltem Minus oder S/H (Soll/Haben).
+ */
+export function parseBankPdfText(text: string, periodMonth?: string): ParsedBankLine[] {
+  const year = periodMonth?.slice(0, 4) ?? String(new Date().getFullYear());
+  const lines: ParsedBankLine[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.replace(/\s+/g, " ").trim();
+    if (!l) continue;
+    const m = l.match(PDF_LINE);
+    if (!m) {
+      const last = lines.at(-1);
+      if (last && !PDF_SKIP.test(l) && !/^\d{1,2}\.\d{1,2}\./.test(l) && last.purpose.length < 250) {
+        last.purpose = `${last.purpose} ${l}`.trim();
+      }
+      continue;
+    }
+    if (PDF_SKIP.test(m[3])) continue;
+    const [d, mo, yRaw] = m[1].split(".");
+    const y = !yRaw ? year : yRaw.length === 2 ? `20${yRaw}` : yRaw;
+    const date = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    let cents: number;
+    try { cents = parseEuroToCents(m[5]); } catch { continue; }
+    if (!cents) continue;
+    const neg = m[4]?.trim() === "-" || m[6] === "-" || m[6] === "S"
+      || (!m[4] && !m[6] && OUTGOING_HINT.test(m[3]));
+    const purpose = m[3].trim();
+    lines.push({ bookingDate: date, amountCents: neg ? -cents : cents, payee: purpose.slice(0, 80), purpose, iban: "" });
+  }
+  return lines;
+}
+
+export function parseBankFile(filename: string, mime: string, data: Buffer, periodMonth?: string): ParsedBankLine[] {
   const name = filename.toLowerCase();
   const text = data.toString("utf8");
   if (name.endsWith(".ofx") || name.endsWith(".qfx") || mime.includes("ofx") || /<OFX>/i.test(text)) {
     return parseBankOfx(text);
   }
+  if (name.endsWith(".pdf.txt") || mime === "text/x-pdf-text") return parseBankPdfText(text, periodMonth);
   return parseBankCsv(text);
+}
+
+/** Vorschlag für die automatische Verbuchung eines nicht zugeordneten Umsatzes */
+export function autoPosting(line: ParsedBankLine): { type: "INCOME_MANUAL" | "EXPENSE"; category: string | null; description: string } {
+  const text = [line.payee, line.purpose].filter(Boolean).join(" · ").slice(0, 240);
+  if (line.amountCents > 0) return { type: "INCOME_MANUAL", category: null, description: `Kontoauszug: ${text || "Gutschrift"}` };
+  return { type: "EXPENSE", category: guessCategory(text) ?? "SONSTIGES", description: `Kontoauszug: ${text || "Abbuchung"}` };
 }
 
 export interface MatchCandidate {
@@ -106,14 +152,25 @@ export function datesClose(a: string, b: string, days = 3): boolean {
   return Number.isFinite(da) && Number.isFinite(db) && Math.abs(da - db) <= days * 86400000;
 }
 
+/**
+ * Ampel: Blau = Geldtransit Bank → Kasse, Grün = passt zu vorhandener Bankbuchung/Rechnung/Beleg,
+ * Rot = noch nicht im Hauptbuch (wird bei Auto-Verbuchung zu "verbucht").
+ * Bereits zugeordnete Hauptbuchzeilen (usedLedger) werden nicht doppelt verwendet.
+ */
 export function matchBankLine(
   line: ParsedBankLine,
   invoices: MatchCandidate[],
   receipts: MatchCandidate[],
-): { status: "GREEN" | "RED" | "CASH_WITHDRAWAL"; invoiceId?: string; receiptId?: string } {
+  ledger: MatchCandidate[] = [],
+  usedLedger: Set<string> = new Set(),
+): { status: "GREEN" | "RED" | "CASH_WITHDRAWAL"; invoiceId?: string; receiptId?: string; ledgerId?: string } {
   if (line.amountCents < 0 && isCashWithdrawal(line.purpose, line.payee)) {
+    const hit = ledger.find((l) => !usedLedger.has(l.id) && l.amountCents === line.amountCents && datesClose(l.dateKey, line.bookingDate, 2));
+    if (hit) return { status: "GREEN", ledgerId: hit.id };
     return { status: "CASH_WITHDRAWAL" };
   }
+  const own = ledger.find((l) => !usedLedger.has(l.id) && l.amountCents === line.amountCents && datesClose(l.dateKey, line.bookingDate));
+  if (own) return { status: "GREEN", ledgerId: own.id };
   if (line.amountCents > 0) {
     const hit = invoices.find((i) => i.amountCents === line.amountCents && datesClose(i.dateKey, line.bookingDate));
     if (hit) return { status: "GREEN", invoiceId: hit.id };

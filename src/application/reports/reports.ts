@@ -1,9 +1,10 @@
 // Modul D: Protokolle, Abschlüsse, Exporte
-import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
-import { invoices, ledgerAttachments, ledgerEntries, periodClosings, receipts, users, type LedgerType } from "@/infrastructure/db/schema";
-import { accountFlow, categoryLabel, type AccountFlow } from "@/domain/cash";
+import { branches, invoices, ledgerAttachments, ledgerCorrections, ledgerEntries, periodClosings, receipts, users, type LedgerType } from "@/infrastructure/db/schema";
+import { accountFlow, categoryLabel, flowType, type AccountFlow } from "@/domain/cash";
+import { filterLedgerRows, type LedgerFilter } from "@/domain/ledger-filter";
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "../context";
@@ -31,10 +32,23 @@ export interface LedgerRow {
   invoiceId: string | null; invoiceNumber: string | null;
   reversalOfId: string | null; reversedType: LedgerType | null; closingId: string | null;
   category: string | null; batchId: string | null; attachmentId: string | null;
+  branchId: string | null; branchName: string | null;
+  /** Ersatzbuchung nach "Ändern": vorheriger Betrag / Text */
+  editedFromCents: number | null; editedFromDescription: string | null;
 }
 
+const editedBy = aliasedTable(ledgerCorrections, "edited_by");
+
+/** Original und Storno einer "Löschen"/"Ändern"-Korrektur sind aus allen Ansichten ausgeblendet */
+export const notHidden = () => sql`not exists (
+  select 1 from "LedgerCorrection" hc
+  where hc."originalId" = ${ledgerEntries.id} or hc."reversalId" = ${ledgerEntries.id}
+)`;
+
 /** Buchungsliste mit Klartext-Infos (Mitarbeiter, Beleg, Rechnung) */
-export async function ledgerRows(tx: Tx, tenantId: string, opts: { range?: Range; employeeId?: string; limit?: number } = {}): Promise<LedgerRow[]> {
+export async function ledgerRows(
+  tx: Tx, tenantId: string, opts: { range?: Range; employeeId?: string; branchId?: string; limit?: number; includeHidden?: boolean } = {},
+): Promise<LedgerRow[]> {
   return tx.select({
     id: ledgerEntries.id, type: ledgerEntries.type, bookingDate: ledgerEntries.bookingDate,
     poolDeltaCents: ledgerEntries.poolDeltaCents,
@@ -47,15 +61,21 @@ export async function ledgerRows(tx: Tx, tenantId: string, opts: { range?: Range
     invoiceId: ledgerEntries.invoiceId, invoiceNumber: invoices.number,
     reversalOfId: ledgerEntries.reversalOfId, reversedType: reversed.type, closingId: ledgerEntries.closingId,
     category: ledgerEntries.category, batchId: ledgerEntries.batchId, attachmentId: ledgerAttachments.id,
+    branchId: ledgerEntries.branchId, branchName: branches.name,
+    editedFromCents: editedBy.previousAmountCents, editedFromDescription: editedBy.previousDescription,
   }).from(ledgerEntries)
     .leftJoin(users, eq(users.id, ledgerEntries.employeeId))
     .leftJoin(receipts, eq(receipts.id, ledgerEntries.receiptId))
     .leftJoin(invoices, eq(invoices.id, ledgerEntries.invoiceId))
     .leftJoin(reversed, eq(reversed.id, ledgerEntries.reversalOfId))
     .leftJoin(ledgerAttachments, eq(ledgerAttachments.ledgerEntryId, ledgerEntries.id))
+    .leftJoin(branches, eq(branches.id, ledgerEntries.branchId))
+    .leftJoin(editedBy, eq(editedBy.replacementId, ledgerEntries.id))
     .where(and(
       eq(ledgerEntries.tenantId, tenantId),
+      opts.includeHidden ? undefined : notHidden(),
       opts.employeeId ? eq(ledgerEntries.employeeId, opts.employeeId) : undefined,
+      opts.branchId === "none" ? isNull(ledgerEntries.branchId) : opts.branchId ? eq(ledgerEntries.branchId, opts.branchId) : undefined,
       opts.range ? gte(ledgerEntries.bookingDate, opts.range.start) : undefined,
       opts.range ? lt(ledgerEntries.bookingDate, opts.range.end) : undefined,
     ))
@@ -220,7 +240,8 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
   const expensesByCategory = [...byCat].filter(([, c]) => c !== 0)
     .map(([category, cents]) => ({ category, label: categoryLabel(category), cents }))
     .sort((a, b) => b.cents - a.cents);
-  const flowRows = onlyEmployeeId ? [] : rows.map((r) => ({ ...r, type: effType(r) }));
+  const inRange = new Set(rows.map((r) => r.id));
+  const flowRows = onlyEmployeeId ? [] : rows.map((r) => ({ ...r, type: flowType(r, inRange) }));
 
   return {
     from: fromKey, to: toKey, pool,
@@ -242,12 +263,15 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
 }
 
 /** Buchungsjournal mit Filtern. Mitarbeiter sehen nur ihr eigenes Konto. */
-export async function listLedger(ctx: Ctx, f: { from?: string; to?: string; employeeId?: string } = {}) {
+export async function listLedger(
+  ctx: Ctx, f: { from?: string; to?: string; employeeId?: string; filter?: LedgerFilter; limit?: number } = {},
+) {
   requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   const tenantId = tid(ctx);
-  const range = f.from && f.to ? rangeFromDays(f.from, f.to) : undefined;
+  const range = f.from || f.to ? rangeFromDays(f.from ?? "2000-01-01", f.to ?? todayKey()) : undefined;
   const employeeId = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? f.employeeId : ctx.userId;
-  return withTenant(ctx, (tx) => ledgerRows(tx, tenantId, { range, employeeId, limit: 1000 }));
+  const rows = await withTenant(ctx, (tx) => ledgerRows(tx, tenantId, { range, employeeId, limit: f.filter ? 20_000 : f.limit ?? 1000 }));
+  return f.filter ? filterLedgerRows(rows, f.filter).slice(0, f.limit ?? 1000) : rows;
 }
 
 export async function getSummary(ctx: Ctx, from: string, to: string, employeeId?: string) {

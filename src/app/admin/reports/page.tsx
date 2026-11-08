@@ -2,11 +2,15 @@ import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { getSummary, listClosings, type Summary } from "@/application/reports/reports";
 import { listEmployees } from "@/application/employees/employees";
-import { btn, cx, Field, inputCls, Money, PageHeader, Section, Table, td } from "@/components/ui";
+import { listBranches } from "@/application/branches/branches";
+import { listPersons } from "@/application/cash/cash";
+import { btn, cx, Field, inputCls, PageHeader, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
+import { LedgerFilterBar } from "@/components/ledger-filter-bar";
 import { AccountFlowList } from "@/components/account-flow";
 import { PersonReportCard } from "@/components/person-report-view";
 import { listPersonReports } from "@/application/reports/person-report";
+import { filterLedgerRows, parseLedgerFilter } from "@/domain/ledger-filter";
 import { formatCents } from "@/domain/money";
 import { fmtDate, fmtDateTime, monthKey, todayKey } from "@/domain/period";
 import { ClosingForm } from "./closing-form";
@@ -15,16 +19,19 @@ export const metadata: Metadata = { title: "Berichte & Abschlüsse" };
 
 const isDay = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
-export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; employeeId?: string }> }) {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser("ADMIN");
   const sp = await searchParams;
   const today = todayKey();
   const from = isDay(sp.from) ? sp.from! : `${monthKey()}-01`;
   const to = isDay(sp.to) ? sp.to! : today;
   const employeeId = sp.employeeId || undefined;
-  const [{ summary: s, entries }, closings, employees, allPeople] = await Promise.all([
+  const filter = parseLedgerFilter(sp);
+  const [{ summary: s, entries }, closings, employees, allPeople, branches, persons] = await Promise.all([
     getSummary(user, from, to, employeeId), listClosings(user), listEmployees(user), listPersonReports(user, from, to),
+    listBranches(user), listPersons(user),
   ]);
+  const shown = filterLedgerRows(entries, filter);
   const people = employeeId ? allPeople.filter((p) => p.person.id === employeeId) : allPeople;
   const qs = new URLSearchParams({ from, to, ...(employeeId ? { employeeId } : {}) }).toString();
   const lm = new Date(); lm.setDate(1); lm.setMonth(lm.getMonth() - 1);
@@ -84,8 +91,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </Section>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <Section title={`Einzelbuchungen (${entries.length})`} flush>
-          <LedgerList rows={entries} mode="both" showEmployee admin />
+        <Section title={`Einzelbuchungen (${shown.length})`} flush>
+          <LedgerFilterBar action="/admin/reports" filter={filter} from={from} to={to} branches={branches} persons={persons}
+            hidden={{ employeeId }} count={shown.length} />
+          <LedgerList rows={shown} mode="both" showEmployee admin branches={branches} />
         </Section>
         <div className="space-y-6">
           <Section title="Abschließen">

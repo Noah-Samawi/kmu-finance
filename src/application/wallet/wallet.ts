@@ -9,6 +9,7 @@ import { DIRECTLY_REVERSIBLE, LEDGER_LABEL, deltasFor, reversalDeltas } from "@/
 import { ACCOUNT_LABEL } from "@/domain/accounts";
 import { adjustSchema, cashExpenseSchema, resetBudgetSchema, returnSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
+import { reverseLedgerEntry } from "../ledger/corrections";
 import { audit, cashBalance, bankBalance, claimBalance, insertEntry, insufficient, loadEmployee, partnerBalance, poolBalance, walletBalance } from "../ledger-service";
 import { dateInputToDate, todayKey } from "@/domain/period";
 
@@ -68,43 +69,8 @@ export async function returnToPool(ctx: Ctx, employeeId: string, input: z.infer<
  * Fehlbuchung stornieren (negierte Gegenbuchung).
  * Kein Konto darf dadurch negativ werden.
  */
-export async function reverseEntry(ctx: Ctx, entryId: string, reason: string) {
-  requireRole(ctx, "ADMIN");
-  const tenantId = tid(ctx);
-  return withTenant(ctx, async (tx) => {
-    await lockTenantLedger(tx, tenantId);
-    const orig = await tx.query.ledgerEntries.findFirst({
-      where: and(eq(ledgerEntries.id, entryId), eq(ledgerEntries.tenantId, tenantId)),
-    });
-    if (!orig) throw notFound("Buchung");
-    if (!DIRECTLY_REVERSIBLE.includes(orig.type)) {
-      throw rule(`${LEDGER_LABEL[orig.type]} kann hier nicht storniert werden (Rechnung stornieren bzw. Beleg ablehnen)`);
-    }
-    const already = await tx.query.ledgerEntries.findFirst({ where: eq(ledgerEntries.reversalOfId, entryId) });
-    if (already) throw rule("Buchung wurde bereits storniert");
-    await assertPartnerEntryReversible(tx, tenantId, entryId);
-
-    const d = reversalDeltas(orig);
-    const cash = await cashBalance(tx, tenantId);
-    const bank = await bankBalance(tx, tenantId);
-    if (cash + (d.cashDeltaCents ?? 0) < 0) throw insufficient("Kassenbestand", cash);
-    if (bank + (d.bankDeltaCents ?? 0) < 0) throw insufficient("Bankkonto", bank);
-    if (orig.employeeId) {
-      const w = await walletBalance(tx, tenantId, orig.employeeId);
-      if (w + d.walletDeltaCents < 0) throw insufficient("Guthaben des Mitarbeiters", w);
-      const c = await claimBalance(tx, tenantId, orig.employeeId);
-      if (c + (d.claimDeltaCents ?? 0) < 0) throw insufficient("Auslagen-Anspruch", c);
-      const p = await partnerBalance(tx, tenantId, orig.employeeId);
-      if (p + (d.partnerDeltaCents ?? 0) < 0) throw insufficient("Kapitalkonto", p);
-    }
-    const entry = await insertEntry(tx, ctx, tenantId, {
-      type: "REVERSAL", ...d, employeeId: orig.employeeId, reversalOfId: orig.id, category: orig.category,
-      description: `Storno: ${reason}`,
-    });
-    await audit(tx, ctx, "ledger.reversal", "LedgerEntry", entry.id, { reversalOf: orig.id, reason });
-    return { entry };
-  });
-}
+/** Stornieren (GoBD-Gegenbuchung) – siehe ledger/corrections */
+export const reverseEntry = reverseLedgerEntry;
 
 export async function recordCashExpense(ctx: Ctx, input: z.infer<typeof cashExpenseSchema>) {
   requireRole(ctx, "EMPLOYEE");

@@ -7,7 +7,7 @@ import { ErrorNote, useApi } from "@/components/use-api";
 import { centsToPlain, formatCents, parseEuroToCents } from "@/domain/money";
 import { fmtDate } from "@/domain/period";
 import { ADMIN_KINDS, FUNDING_LABEL, PARTNER_KIND_LABEL, allowedSources, isPurchase, type FundingSource } from "@/domain/partner";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_KEYS } from "@/domain/cash";
+import { BranchSelect, CategoryField, type BranchOption } from "@/components/branch-category";
 import { DailyIncomeForm, ExpenseForm, type PersonOption } from "@/components/cash-forms";
 
 interface Partner {
@@ -15,7 +15,9 @@ interface Partner {
   capitalCents: number; outlayOpenCents: number; budgetCents: number; bookings: PartnerBookingRow[];
 }
 
-export function PartnerForms({ partner, today, cashCents, bankCents }: { partner?: Partner; today?: string; cashCents?: number; bankCents?: number }) {
+export function PartnerForms({ partner, today, cashCents, bankCents, branches }: {
+  partner?: Partner; today?: string; cashCents?: number; bankCents?: number; branches?: BranchOption[];
+}) {
   const { call, busy, error } = useApi();
   const [more, setMore] = useState<null | "income" | "expense">(null);
   if (!partner) {
@@ -41,7 +43,7 @@ export function PartnerForms({ partner, today, cashCents, bankCents }: { partner
   }
   return (
     <div className="mt-3 space-y-4">
-      <AdminBookingForm partner={partner} />
+      <AdminBookingForm partner={partner} branches={branches} />
       <RefundForm partnerId={partner.id} bookings={partner.bookings} />
       <div className="rounded-lg border border-line p-3">
         <p className="text-sm font-medium">{`Über Kasse & Bank – ${partner.name} zuordnen`}</p>
@@ -56,8 +58,8 @@ export function PartnerForms({ partner, today, cashCents, bankCents }: { partner
         {more && today && (
           <div className="mt-3">
             {more === "income"
-              ? <DailyIncomeForm today={today} persons={[]} preset={asPerson(partner)} />
-              : <ExpenseForm today={today} persons={[]} preset={asPerson(partner)} balances={{ CASH: cashCents, BANK: bankCents }} />}
+              ? <DailyIncomeForm today={today} persons={[]} preset={asPerson(partner)} branches={branches} />
+              : <ExpenseForm today={today} persons={[]} preset={asPerson(partner)} balances={{ CASH: cashCents, BANK: bankCents }} branches={branches} />}
           </div>
         )}
       </div>
@@ -91,7 +93,7 @@ const KIND_GROUPS: { label: string; kinds: AdminKind[] }[] = [
   { label: "Entnahme", kinds: ["DRAW"] },
 ];
 
-function AdminBookingForm({ partner }: { partner: Partner }) {
+function AdminBookingForm({ partner, branches }: { partner: Partner; branches?: BranchOption[] }) {
   const { call, busy, error } = useApi();
   const [kind, setKind] = useState<AdminKind>("DEPOSIT");
   const [amount, setAmount] = useState("");
@@ -106,7 +108,7 @@ function AdminBookingForm({ partner }: { partner: Partner }) {
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
       if (await call("POST", `/api/v1/partners/${partner.id}/book`, {
         kind, source: sources ? f.source : null, amountCents: amount, purpose: f.purpose,
-        bookingDate: f.bookingDate || undefined, category: purchase ? f.category : undefined,
+        bookingDate: f.bookingDate || undefined, category: purchase ? f.category : undefined, branchId: f.branchId || null,
       })) { form.reset(); setAmount(""); }
     }}>
       <p className="text-sm font-medium sm:col-span-2">{`Buchung für ${partner.name}`}</p>
@@ -120,11 +122,7 @@ function AdminBookingForm({ partner }: { partner: Partner }) {
         </select>
       </Field>
       {purchase ? (
-        <Field label="Kategorie">
-          <select key={kind} name="category" required defaultValue="WAREN" className={inputCls}>
-            {EXPENSE_CATEGORY_KEYS.map((k) => <option key={k} value={k}>{EXPENSE_CATEGORIES[k]}</option>)}
-          </select>
-        </Field>
+        <CategoryField key={kind} />
       ) : (
         <Field label="Mittelherkunft / Konto">
           {sources ? (
@@ -140,6 +138,7 @@ function AdminBookingForm({ partner }: { partner: Partner }) {
       <Field label="Wofür? / Begründung" className="sm:col-span-2">
         <input name="purpose" required minLength={3} placeholder={purchase ? "z. B. Metro Fleischeinkauf" : undefined} className={inputCls} dir="auto" />
       </Field>
+      <BranchSelect branches={branches} className="sm:col-span-2" />
       {purchase && (
         <p className="rounded-lg bg-paper px-3 py-2 text-sm tabular sm:col-span-2">
           {kind === "PURCHASE_CAPITAL" ? "Kapitalkonto" : "Budget / Vorschuss"}: {formatCents(base)}

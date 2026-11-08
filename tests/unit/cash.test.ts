@@ -171,7 +171,7 @@ describe("Strikte Trennung Kasse (Bar) / Bankkonto", () => {
   it("Kasse enthält nur Kassenbewegungen – Einnahmen erhöhen, Ausgaben mindern", () => {
     expect(accountFlow("CASH", 10_000, rows)).toEqual({
       openingCents: 10_000, dailyIncomeCents: 85_050, invoiceIncomeCents: 0, expenseCents: 4_990,
-      allocatedCents: 10_000, returnedCents: 2_000, transferCents: 20_000, correctionCents: -1_000, otherCents: 0,
+      allocatedCents: 10_000, returnedCents: 2_000, transferCents: 20_000, correctionCents: -1_000, otherCents: 0, priorReversalCents: 0,
       closingCents: 10_000 + 85_050 - 4_990 - 10_000 + 2_000 + 20_000 - 1_000,
     });
   });
@@ -179,7 +179,7 @@ describe("Strikte Trennung Kasse (Bar) / Bankkonto", () => {
   it("Bank enthält nur Bankbewegungen – nie mit der Kasse zusammengerechnet", () => {
     expect(accountFlow("BANK", 0, rows)).toEqual({
       openingCents: 0, dailyIncomeCents: 120_000, invoiceIncomeCents: 50_000, expenseCents: 30_000,
-      allocatedCents: 0, returnedCents: 0, transferCents: -20_000, correctionCents: 0, otherCents: 600_000,
+      allocatedCents: 0, returnedCents: 0, transferCents: -20_000, correctionCents: 0, otherCents: 600_000, priorReversalCents: 0,
       closingCents: 120_000 + 50_000 - 30_000 - 20_000 + 600_000,
     });
   });

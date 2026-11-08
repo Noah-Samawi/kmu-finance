@@ -50,7 +50,7 @@ export const ledgerTypeEnum = pgEnum("LedgerType", [
 export const paymentMethodEnum = pgEnum("PaymentMethod", ["TRANSFER", "CASH"]);
 export const accountKindEnum = pgEnum("AccountKind", ["CASH", "BANK"]);
 export const hrDocKindEnum = pgEnum("HrDocKind", ["ID", "CONTRACT", "TIMESHEET", "TAX", "PAYSLIP", "OTHER"]);
-export const reconcileStatusEnum = pgEnum("ReconcileStatus", ["GREEN", "RED", "CASH_WITHDRAWAL"]);
+export const reconcileStatusEnum = pgEnum("ReconcileStatus", ["GREEN", "RED", "CASH_WITHDRAWAL", "BOOKED"]);
 export const churchTaxEnum = pgEnum("ChurchTax", ["NONE", "EIGHT", "NINE"]);
 export const fundingSourceEnum = pgEnum("FundingSource", ["PRIVATE", "BANK", "CASH"]);
 export const partnerBookingKindEnum = pgEnum("PartnerBookingKind", [
@@ -117,6 +117,16 @@ export const sessions = pgTable("Session", {
   expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
   createdAt: createdAt(),
 }, (t) => [index("Session_user_idx").on(t.userId)]);
+
+// Filialen / Standorte einer Firma (Konten laufen zentral, Auswertung je Filiale)
+export const branches = pgTable("Branch", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  name: text("name").notNull(),
+  city: text("city"),
+  isActive: boolean("isActive").notNull().default(true),
+  createdAt: createdAt(),
+});
 
 // ---------------------------------------------------------------------
 // MODUL A: KUNDEN & RECHNUNGEN
@@ -203,6 +213,7 @@ export const receipts = pgTable("Receipt", {
   reviewedById: text("reviewedById").references(() => users.id),
   reviewedAt: timestamp("reviewedAt", { withTimezone: true }),
   rejectReason: text("rejectReason"),
+  branchId: text("branchId").references(() => branches.id),
   createdAt: createdAt(),
 }, (t) => [
   uniqueIndex("Receipt_tenant_sha_key").on(t.tenantId, t.fileSha256),
@@ -253,6 +264,8 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   category: text("category"),
   /** verbindet Teilbuchungen einer Bewegung (z. B. Tageseinnahme Kasse + Bank) */
   batchId: text("batchId"),
+  /** Filiale / Standort (optional, Konten laufen zentral) */
+  branchId: text("branchId").references(() => branches.id),
   createdAt: createdAt(), // KEIN updatedAt: unveränderlich
 }, (t) => [
   index("Ledger_tenant_date_idx").on(t.tenantId, t.bookingDate),
@@ -268,6 +281,25 @@ export const ledgerAttachments = pgTable("LedgerAttachment", {
   fileKey: text("fileKey").notNull(),
   mime: text("mime").notNull(),
   name: text("name").notNull(),
+  createdById: text("createdById").notNull().references(() => users.id),
+  createdAt: createdAt(),
+});
+
+/**
+ * "Löschen" und "Ändern" einer Buchung – GoBD-konform: das Original wird per Storno neutralisiert
+ * (gleicher Buchungstag), beim Ändern folgt eine Ersatzbuchung. Original + Storno sind danach
+ * aus den Ansichten ausgeblendet, bleiben aber im Hauptbuch und Protokoll erhalten.
+ */
+export const ledgerCorrections = pgTable("LedgerCorrection", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  kind: text("kind").$type<"REMOVE" | "EDIT">().notNull(),
+  originalId: text("originalId").notNull().unique().references(() => ledgerEntries.id),
+  reversalId: text("reversalId").notNull().unique().references(() => ledgerEntries.id),
+  replacementId: text("replacementId").unique().references(() => ledgerEntries.id),
+  previousAmountCents: integer("previousAmountCents").notNull(),
+  previousDescription: text("previousDescription"),
+  reason: text("reason").notNull(),
   createdById: text("createdById").notNull().references(() => users.id),
   createdAt: createdAt(),
 });
@@ -393,6 +425,7 @@ export const bankStatements = pgTable("BankStatement", {
   fileName: text("fileName").notNull(),
   fileMime: text("fileMime").notNull(),
   fileKey: text("fileKey").notNull(),
+  branchId: text("branchId").references(() => branches.id),
   createdById: text("createdById").notNull().references(() => users.id),
   createdAt: createdAt(),
 }, (t) => [index("BankStatement_tenant_month_idx").on(t.tenantId, t.periodMonth)]);
@@ -410,6 +443,8 @@ export const bankTransactions = pgTable("BankTransaction", {
   matchedInvoiceId: text("matchedInvoiceId").references(() => invoices.id),
   matchedReceiptId: text("matchedReceiptId").references(() => receipts.id),
   postedLedgerId: text("postedLedgerId").references(() => ledgerEntries.id),
+  /** vorhandene Hauptbuchzeile, die zu diesem Umsatz passt (keine Doppelbuchung) */
+  matchedLedgerId: text("matchedLedgerId").references(() => ledgerEntries.id),
   createdAt: createdAt(),
 }, (t) => [index("BankTx_tenant_date_idx").on(t.tenantId, t.bookingDate)]);
 

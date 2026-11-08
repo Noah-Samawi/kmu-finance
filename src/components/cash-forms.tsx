@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { btn, cx, Field, inputCls } from "@/components/ui";
 import { ErrorNote, useApi } from "@/components/use-api";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_KEYS, FUND_LABEL, type ExpenseFund } from "@/domain/cash";
+import { EXPENSE_CATEGORIES, FUND_LABEL, type ExpenseFund } from "@/domain/cash";
+import type { ReceiptSuggestion } from "@/domain/ocr";
+import { BranchSelect, CategoryField, type BranchOption } from "./branch-category";
 import { REASON_MIN_WITHOUT_RECEIPT } from "@/domain/partner";
 import { formatCents, parseEuroToCents } from "@/domain/money";
 import { fmtDate } from "@/domain/period";
@@ -93,7 +95,9 @@ export function DuplicateWarning({ account, day }: { account: "CASH" | "BANK"; d
  * Tageseinnahme: Kasse (Bar) und Bankkonto für ein Datum in einem Schritt –
  * gebucht werden zwei getrennte Einnahmen auf zwei getrennte Konten (nie zusammengerechnet).
  */
-export function DailyIncomeForm({ today, persons, preset }: { today: string; persons: PersonOption[]; preset?: PersonOption | null }) {
+export function DailyIncomeForm({ today, persons, preset, branches }: {
+  today: string; persons: PersonOption[]; preset?: PersonOption | null; branches?: BranchOption[];
+}) {
   const { call, busy, error, setError } = useApi();
   const [date, setDate] = useState(today);
   const [cash, setCash] = useState("");
@@ -113,6 +117,7 @@ export function DailyIncomeForm({ today, persons, preset }: { today: string; per
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
       const r = await call<{ cashCents: number; bankCents: number }>("POST", "/api/v1/cash/income", {
         bookingDate: date, cashCents: cash || null, bankCents: bank || null, description: f.description, personId: f.personId || null,
+        branchId: f.branchId || null,
       });
       if (r) {
         setDone([
@@ -139,7 +144,10 @@ export function DailyIncomeForm({ today, persons, preset }: { today: string; per
       {info && hasCash && <DuplicateWarning account="CASH" day={info.cash} />}
       {info && hasBank && <DuplicateWarning account="BANK" day={info.bank} />}
       <Field label="Wofür?"><input name="description" required minLength={2} defaultValue="Tageseinnahme" className={inputCls} dir="auto" /></Field>
-      <PersonSelect persons={persons} preset={preset} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PersonSelect persons={persons} preset={preset} />
+        <BranchSelect branches={branches} />
+      </div>
       <ErrorNote error={error} />
       {done && <p className="text-sm font-medium text-ledger">{done}</p>}
       <button disabled={busy} className={cx(btn.base, btn.primary, "w-full")}>
@@ -149,28 +157,83 @@ export function DailyIncomeForm({ today, persons, preset }: { today: string; per
   );
 }
 
-/** Gastro-Ausgabe: Wareneinkauf / Betriebskosten mit Herkunftskonto, Kategorie und Beleg oder Begründung */
-export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], balances = {} }: {
+const centsToInput = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+
+/** Gastro-Ausgabe: Wareneinkauf / Betriebskosten mit Herkunftskonto, Kategorie, Filiale und Beleg (mit Belegerkennung) */
+export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], balances = {}, branches }: {
   today: string; persons: PersonOption[]; preset?: PersonOption | null;
-  funds?: Exclude<ExpenseFund, "CAPITAL">[]; balances?: Partial<Record<ExpenseFund, number>>;
+  funds?: Exclude<ExpenseFund, "CAPITAL">[]; balances?: Partial<Record<ExpenseFund, number>>; branches?: BranchOption[];
 }) {
   const { call, busy, error, setError } = useApi();
   const [fund, setFund] = useState(funds[0]);
-  const [hasFile, setHasFile] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [amount, setAmount] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [date, setDate] = useState(today);
+  const [category, setCategory] = useState("WAREN");
+  const [ocr, setOcr] = useState<{ busy: boolean; progress: number; hint: (ReceiptSuggestion & { text: string }) | null; error: string | null }>(
+    { busy: false, progress: 0, hint: null, error: null },
+  );
+
+  async function analyse(f: File) {
+    setOcr({ busy: true, progress: 0, hint: null, error: null });
+    try {
+      const { recognizeReceipt } = await import("./ocr");
+      const hint = await recognizeReceipt(f, (p) => setOcr((o) => ({ ...o, progress: p })));
+      setOcr({ busy: false, progress: 1, hint, error: hint.amountCents || hint.merchant ? null : "Kein Betrag erkannt – bitte manuell erfassen" });
+    } catch {
+      setOcr({ busy: false, progress: 0, hint: null, error: "Belegerkennung nicht möglich – bitte manuell erfassen" });
+    }
+  }
+
+  function apply(h: ReceiptSuggestion) {
+    if (h.amountCents) setAmount(centsToInput(h.amountCents));
+    if (h.merchant) setPurpose((p) => p.trim() ? p : `${h.merchant} – Einkauf`);
+    if (h.date && h.date <= today) setDate(h.date);
+    if (h.category) setCategory(h.category);
+    const target = h.payment === "CASH" ? "CASH" : h.payment === "CARD" ? "BANK" : null;
+    if (target && funds.includes(target)) setFund(target);
+  }
+
   return (
     <form className="space-y-3" onSubmit={async (e) => {
       e.preventDefault();
       const form = e.currentTarget;
       const fd = new FormData(form);
-      const file = fd.get("file") as File | null;
-      if (!file || !file.size) fd.delete("file");
-      const purpose = String(fd.get("purpose") ?? "").trim();
-      if (!fd.has("file") && purpose.length < REASON_MIN_WITHOUT_RECEIPT) {
+      if (file) fd.set("file", file); else fd.delete("file");
+      if (!file && purpose.trim().length < REASON_MIN_WITHOUT_RECEIPT) {
         return setError(`Ohne Beleg ist eine Begründung Pflicht (mindestens ${REASON_MIN_WITHOUT_RECEIPT} Zeichen)`);
       }
       fd.set("fund", fund);
-      if (await call("POST", "/api/v1/cash/expenses", fd)) { form.reset(); setHasFile(false); }
+      if (await call("POST", "/api/v1/cash/expenses", fd)) {
+        form.reset(); setFile(null); setAmount(""); setPurpose(""); setDate(today); setCategory("WAREN");
+        setOcr({ busy: false, progress: 0, hint: null, error: null });
+      }
     }}>
+      <Field label="Beleg (Foto oder PDF)" hint="Optional – Lieferant, Betrag, Datum und Bar/Karte werden automatisch erkannt">
+        <input name="file" type="file" accept="image/*,application/pdf" className="block w-full text-sm" onChange={(e) => {
+          const f = e.target.files?.[0] ?? null;
+          setFile(f);
+          if (f) analyse(f); else setOcr({ busy: false, progress: 0, hint: null, error: null });
+        }} />
+      </Field>
+      {ocr.busy && <p className="text-sm text-muted">{`Beleg wird gelesen … ${Math.round(ocr.progress * 100)} %`}</p>}
+      {ocr.error && <p className="text-sm text-amber-700">{ocr.error}</p>}
+      {ocr.hint && (ocr.hint.amountCents || ocr.hint.merchant) && (
+        <div className="rounded-lg border border-ledger/30 bg-ledger-soft px-3 py-2 text-sm">
+          <p className="font-medium">Buchungsvorschlag aus dem Beleg</p>
+          <p className="text-muted">
+            {[
+              ocr.hint.merchant && `Lieferant: ${ocr.hint.merchant}`,
+              ocr.hint.amountCents && `Betrag: ${formatCents(ocr.hint.amountCents)}`,
+              ocr.hint.date && `Datum: ${dateLabel(ocr.hint.date)}`,
+              ocr.hint.payment && `Zahlung: ${ocr.hint.payment === "CASH" ? "Bar → Ausgaben Kasse (Bar)" : "Karte → Ausgaben Bankkonto"}`,
+              ocr.hint.category && `Kategorie: ${EXPENSE_CATEGORIES[ocr.hint.category]}`,
+            ].filter(Boolean).join(" · ")}
+          </p>
+          <button type="button" onClick={() => apply(ocr.hint!)} className={cx(btn.base, btn.primary, btn.sm, "mt-2")}>Vorschlag übernehmen</button>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Ausgabenkanal (Herkunftskonto)">
           <select value={fund} onChange={(e) => setFund(e.target.value as typeof fund)} className={inputCls}>
@@ -179,25 +242,21 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
             ))}
           </select>
         </Field>
-        <Field label="Kategorie">
-          <select name="category" required defaultValue="WAREN" className={inputCls}>
-            {EXPENSE_CATEGORY_KEYS.map((k) => <option key={k} value={k}>{EXPENSE_CATEGORIES[k]}</option>)}
-          </select>
-        </Field>
-        <Field label="Betrag"><input name="amount" required inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} /></Field>
-        <Field label="Datum"><input name="bookingDate" type="date" max={today} defaultValue={today} className={inputCls} /></Field>
+        <CategoryField value={category} onChange={setCategory} />
+        <Field label="Betrag"><input name="amount" value={amount} onChange={(e) => setAmount(e.target.value)} required inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} /></Field>
+        <Field label="Datum"><input name="bookingDate" type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
       </div>
-      <Field label={hasFile ? "Wofür?" : `Wofür? / Begründung (ohne Beleg mind. ${REASON_MIN_WITHOUT_RECEIPT} Zeichen)`}>
-        <input name="purpose" required minLength={3} placeholder="z. B. Metro – Fleisch und Gemüse" className={inputCls} dir="auto" />
+      <Field label={file ? "Wofür?" : `Wofür? / Begründung (ohne Beleg mind. ${REASON_MIN_WITHOUT_RECEIPT} Zeichen)`}>
+        <input name="purpose" value={purpose} onChange={(e) => setPurpose(e.target.value)} required minLength={3} placeholder="z. B. Metro – Fleisch und Gemüse" className={inputCls} dir="auto" />
       </Field>
-      <Field label="Beleg (Foto oder PDF)" hint="Optional – ohne Beleg ist die Begründung Pflicht">
-        <input name="file" type="file" accept="image/*,application/pdf" onChange={(e) => setHasFile(!!e.target.files?.length)} className="block w-full text-sm" />
-      </Field>
-      {fund === "BUDGET" && !preset
-        ? <PersonSelect persons={persons.filter((p) => p.role === "EMPLOYEE")} required label="Aus dem Budget von" />
-        : <PersonSelect persons={persons} preset={preset} />}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {fund === "BUDGET" && !preset
+          ? <PersonSelect persons={persons.filter((p) => p.role === "EMPLOYEE")} required label="Aus dem Budget von" />
+          : <PersonSelect persons={persons} preset={preset} />}
+        <BranchSelect branches={branches} />
+      </div>
       <ErrorNote error={error} />
-      <button disabled={busy} className={cx(btn.base, btn.primary, "w-full")}>Ausgabe buchen</button>
+      <button disabled={busy || ocr.busy} className={cx(btn.base, btn.primary, "w-full")}>Ausgabe buchen</button>
     </form>
   );
 }

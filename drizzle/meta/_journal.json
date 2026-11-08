@@ -64,6 +64,13 @@
       "when": 1792800000000,
       "tag": "0008_cash_expenses",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794100000000,
+      "tag": "0009_branches_corrections",
+      "breakpoints": true
     }
   ]
 }

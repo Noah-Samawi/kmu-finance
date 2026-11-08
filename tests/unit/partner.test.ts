@@ -144,7 +144,7 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
     id: "b1", partnerId: "p1", partnerName: "Samir Haddad", kind: "OUTLAY", source: "PRIVATE", amountCents: 100_000,
     purpose: "Ware beim Großhandel bezahlt", hasReceipt: false, bookingDate: d, createdByName: "Samir Haddad",
     selfEntered: true, ledgerEntryId: "l1", reversed: false, refundable: true, refundedCents: 40_000, openCents: 60_000,
-    status: "PARTIAL", settles: [], ...over,
+    status: "PARTIAL", settles: [], branchId: null, branchName: null, editedFromCents: null, ...over,
   });
   const bookings = [
     row({}),

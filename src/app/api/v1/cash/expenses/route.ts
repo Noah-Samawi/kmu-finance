@@ -9,7 +9,7 @@ export const maxDuration = 30;
 
 /**
  * Betriebsausgabe: JSON oder multipart/form-data
- * { fund: CASH|BANK|BUDGET, category, amount|amountCents, purpose, bookingDate?, personId?, file? }
+ * { fund: CASH|BANK|BUDGET, category (Schlüssel oder eigene Kategorie), amount|amountCents, purpose, bookingDate?, personId?, branchId?, file? }
  */
 export const POST = route(["ADMIN"], async ({ req, ctx }) => {
   if (!(req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
@@ -28,6 +28,7 @@ export const POST = route(["ADMIN"], async ({ req, ctx }) => {
     purpose: String(form.get("purpose") ?? ""),
     bookingDate: form.get("bookingDate") || undefined,
     personId: form.get("personId") || undefined,
+    branchId: form.get("branchId") || null,
   });
   return recordExpense(ctx, input, await readUpload(form.get("file")));
 });

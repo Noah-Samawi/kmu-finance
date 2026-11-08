@@ -5,6 +5,7 @@ import { aliasedTable, and, asc, eq, gte, inArray, isNull, lt } from "drizzle-or
 import { z } from "zod";
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
+import { notHidden } from "@/application/reports/reports";
 import { ledgerAttachments, ledgerEntries, users } from "@/infrastructure/db/schema";
 import { storage } from "@/infrastructure/storage";
 import { forbidden, isAppError, notFound, rule } from "@/domain/errors";
@@ -18,6 +19,7 @@ import { dateInputToDate, dayRange, todayKey } from "@/domain/period";
 import { balanceCorrectionSchema, dailyIncomeSchema, expenseSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import { accountBalance, audit, bankBalance, cashBalance, insertEntry, insufficient, walletBalance } from "../ledger-service";
+import { assertBranch } from "../branches/assert-branch";
 import { parseReceiptDataUrl } from "../receipts/inline-file";
 import { storeReceiptFile, type UploadFile } from "../receipts/store-file";
 
@@ -63,7 +65,7 @@ async function incomesOn(tx: Tx, tenantId: string, day: string): Promise<DayInco
   }).from(ledgerEntries)
     .leftJoin(reversal, eq(reversal.reversalOfId, ledgerEntries.id))
     .where(and(
-      eq(ledgerEntries.tenantId, tenantId), eq(ledgerEntries.type, "INCOME_MANUAL"), isNull(reversal.id),
+      eq(ledgerEntries.tenantId, tenantId), eq(ledgerEntries.type, "INCOME_MANUAL"), isNull(reversal.id), notHidden(),
       gte(ledgerEntries.bookingDate, start), lt(ledgerEntries.bookingDate, end),
     ))
     .orderBy(asc(ledgerEntries.bookingDate));
@@ -114,6 +116,7 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
   return withTenant(ctx, async (tx) => {
     await lockTenantLedger(tx, tenantId);
     const person = input.personId ? await loadPerson(tx, tenantId, input.personId) : null;
+    const branchId = await assertBranch(tx, tenantId, input.branchId);
     const existing = countOn(await incomesOn(tx, tenantId, input.bookingDate));
     const batchId = parts.length > 1 ? randomUUID() : null;
     const bookingDate = bookingDateFor(input.bookingDate);
@@ -121,7 +124,7 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
     for (const p of parts) {
       entries.push(await insertEntry(tx, ctx, tenantId, {
         type: "INCOME_MANUAL", ...deltasFor("INCOME_MANUAL", p.amountCents, p.account),
-        employeeId: person?.id ?? null, batchId, bookingDate,
+        employeeId: person?.id ?? null, batchId, bookingDate, branchId,
         description: [input.description, ACCOUNT_LABEL[p.account], person && `über ${person.name}`].filter(Boolean).join(" · "),
       }));
     }
@@ -156,6 +159,7 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
   return withTenant(ctx, async (tx) => {
     await lockTenantLedger(tx, tenantId);
     const person = input.personId ? await loadPerson(tx, tenantId, input.personId) : null;
+    const branchId = await assertBranch(tx, tenantId, input.branchId);
     if (input.fund === "BUDGET") {
       if (person!.role !== "EMPLOYEE") throw rule("Einkäufe von Gesellschaftern bitte unter Partner & Gesellschafter buchen (Kapital oder Budget)");
       const w = await walletBalance(tx, tenantId, person!.id);
@@ -165,7 +169,7 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
       if (avail < input.amountCents) throw insufficient(ACCOUNT_LABEL[input.fund], avail);
     }
     const entry = await insertEntry(tx, ctx, tenantId, {
-      type: "EXPENSE", ...deltas, category: input.category,
+      type: "EXPENSE", ...deltas, category: input.category, branchId,
       employeeId: person?.id ?? null, bookingDate: bookingDateFor(input.bookingDate),
       description: [categoryLabel(input.category), input.purpose.trim(), `aus ${FUND_LABEL[input.fund]}`, person && input.fund !== "BUDGET" && `durch ${person.name}`]
         .filter(Boolean).join(" · "),
@@ -176,7 +180,7 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
       });
     }
     await audit(tx, ctx, "cash.expense", "LedgerEntry", entry.id, {
-      fund: input.fund, category: input.category, amountCents: input.amountCents, personId: person?.id ?? null, receipt: !!stored,
+      fund: input.fund, category: input.category, amountCents: input.amountCents, personId: person?.id ?? null, receipt: !!stored, branchId,
     });
     return {
       entry,

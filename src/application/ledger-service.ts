@@ -146,6 +146,7 @@ export interface NewEntry {
   bookingDate?: Date;
   category?: string | null;
   batchId?: string | null;
+  branchId?: string | null;
 }
 
 export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntry) {

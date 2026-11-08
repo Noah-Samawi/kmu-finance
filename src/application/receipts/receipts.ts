@@ -10,6 +10,7 @@ import { deltasFor, reversalDeltas } from "@/domain/ledger";
 import { dateInputToDate, todayKey } from "@/domain/period";
 import { formatCents } from "@/domain/money";
 import { receiptFieldsSchema } from "@/lib/validation/schemas";
+import { assertBranch } from "../branches/assert-branch";
 import { requireRole, tid, type Ctx } from "../context";
 import { audit, claimBalance, insertEntry, walletBalance } from "../ledger-service";
 import { ALLOWED_MIME, resolveReceiptMime } from "./mime";
@@ -105,8 +106,9 @@ export async function submitReceipt(
         throw rule(`Beleg (${formatCents(input.amountCents)}) übersteigt dein Guthaben (${formatCents(balance)}). Als Auslage (privates Geld) einreichen oder Geschäftsführung fragen.`);
       }
 
+      const branchId = await assertBranch(tx, tenantId, input.branchId);
       const [r] = await tx.insert(receipts).values({
-        tenantId, employeeId: ctx.userId, amountCents: input.amountCents, vatRate: input.vatRate ?? null,
+        tenantId, employeeId: ctx.userId, amountCents: input.amountCents, vatRate: input.vatRate ?? null, branchId,
         merchant: input.merchant, description: input.description,
         receiptDate: dateInputToDate(input.receiptDate),
         fileKey, fileMime: mime, fileSha256: sha,
@@ -114,7 +116,7 @@ export async function submitReceipt(
       await insertEntry(tx, ctx, tenantId, {
         type: asOutlay ? "EMPLOYEE_OUTLAY" : "RECEIPT",
         ...(asOutlay ? deltasFor("EMPLOYEE_OUTLAY", input.amountCents) : deltasFor("RECEIPT", input.amountCents)),
-        employeeId: ctx.userId,
+        employeeId: ctx.userId, branchId,
         receiptId: r.id, description: `${asOutlay ? "Auslage · " : ""}${input.merchant}${input.description ? ` – ${input.description}` : ""}`,
       });
       await audit(tx, ctx, asOutlay ? "receipt.outlay" : "receipt.submitted", "Receipt", r.id, { amountCents: input.amountCents });

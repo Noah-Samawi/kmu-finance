@@ -14,5 +14,5 @@ export const POST = route(["ADMIN"], async ({ req, ctx }) => {
   const periodMonth = String(form.get("periodMonth") ?? "").slice(0, 7);
   return uploadBankStatement(ctx, periodMonth, {
     data: Buffer.from(await file.arrayBuffer()), mime: file.type, name: file.name,
-  });
+  }, { autoBook: form.get("autoBook") === "1", branchId: String(form.get("branchId") ?? "") || null });
 });

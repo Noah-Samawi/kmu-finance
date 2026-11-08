@@ -69,6 +69,7 @@ export const POST = route(["EMPLOYEE"], async ({ req, ctx }) => {
       receiptDate: form.get("receiptDate"),
       vatRate: form.get("vatRate") || null,
       asOutlay: form.get("asOutlay") || false,
+      branchId: form.get("branchId") || null,
     });
   } catch (e) {
     console.error("[receipts POST] Validierung fehlgeschlagen", errorDetails(e));

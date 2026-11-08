@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { parseEuroToCents } from "@/domain/money";
 import { parseVatRate } from "@/domain/invoice";
-import { EXPENSE_CATEGORY_KEYS, type ExpenseCategory } from "@/domain/cash";
+import { normalizeCategory } from "@/domain/cash";
 
 // Gemeinsame Zod-Schemas für Client und Server.
 
@@ -92,9 +92,19 @@ const fundingSource = z.enum(["PRIVATE", "BANK", "CASH"], {
 const purpose = z.string().trim().min(3, "Wofür? / Begründung fehlt").max(500);
 
 /** Admin: Gesellschafter-Vorgang buchen (Erstattung läuft separat über partnerRefundSchema) */
-export const expenseCategory = z.enum(EXPENSE_CATEGORY_KEYS as [ExpenseCategory, ...ExpenseCategory[]], {
-  errorMap: () => ({ message: "Bitte Kategorie auswählen" }),
+/** feste Kategorie (Schlüssel) oder eigene Freitext-Kategorie */
+export const expenseCategory = z.string({ required_error: "Bitte Kategorie auswählen" }).transform((v, ctx) => {
+  try {
+    const c = normalizeCategory(v);
+    if (!c) throw new Error("Bitte Kategorie auswählen oder eigene Kategorie eingeben");
+    return c;
+  } catch (e) {
+    ctx.addIssue({ code: "custom", message: (e as Error).message });
+    return z.NEVER;
+  }
 });
+/** optionale Filiale / Standort */
+export const branchId = z.string().trim().max(64).optional().nullable().transform((v) => v || null);
 
 export const partnerBookSchema = z.object({
   kind: z.enum([
@@ -106,6 +116,7 @@ export const partnerBookSchema = z.object({
   bookingDate: dateStr.optional(),
   /** Pflicht bei Einkäufen für die Firma */
   category: expenseCategory.optional().nullable(),
+  branchId,
 });
 
 /** Gesellschafter: eigene Einlage, Auslage oder Entnahme (Mittelherkunft Pflicht) */
@@ -237,6 +248,7 @@ export const dailyIncomeSchema = z.object({
   bankCents: optionalAmount,
   description: z.string().trim().min(2, "Wofür? fehlt").max(300),
   personId,
+  branchId,
 });
 
 /** Betriebsausgabe (Gastro): Herkunft Kasse/Bank oder Budget einer Person */
@@ -247,7 +259,25 @@ export const expenseSchema = z.object({
   purpose: z.string().trim().min(3, "Wofür? / Begründung fehlt").max(500),
   bookingDate: dateStr.optional(),
   personId,
+  branchId,
 });
+
+/** Buchung löschen (aus allen Ansichten entfernen, Kontostand neu) */
+export const removeEntrySchema = z.object({ reason: z.string().trim().min(3, "Grund fehlt (mind. 3 Zeichen)").max(300) });
+
+/** Buchung ändern: neuer Betrag und/oder neuer Verwendungszweck */
+export const editEntrySchema = z.object({
+  amountCents: optionalAmount,
+  description: z.string().trim().min(2).max(300).optional().nullable().transform((v) => v || null),
+  reason: z.string().trim().min(3, "Grund der Änderung fehlt (mind. 3 Zeichen)").max(300),
+  branchId: z.string().trim().max(64).optional().nullable(),
+}).refine((v) => v.amountCents !== null || v.description !== null || v.branchId !== undefined, "Bitte neuen Betrag, Verwendungszweck oder Filiale angeben");
+
+export const branchSchema = z.object({
+  name: z.string().trim().min(2, "Name der Filiale (mind. 2 Zeichen)").max(60),
+  city: z.string().trim().max(80).optional().nullable().transform((v) => v || null),
+});
+export const branchUpdateSchema = branchSchema.partial().extend({ isActive: z.boolean().optional() });
 
 /** Bestandskorrektur zum Stichtag: neuer Ist-Bestand statt Differenz */
 export const balanceCorrectionSchema = z.object({
@@ -314,6 +344,7 @@ export const receiptFieldsSchema = z.object({
   merchant: z.string().trim().min(1).max(200),
   description: optStr(500),
   receiptDate: dateStr,
+  branchId,
   asOutlay: z.union([z.boolean(), z.string()]).optional()
     .transform((v) => v === true || v === "true" || v === "1" || v === "on"),
   vatRate: z.any().optional().nullable()

@@ -3,7 +3,10 @@ import { requireUser } from "@/lib/auth";
 import { poolOverview } from "@/application/pool/pool";
 import { listEmployees } from "@/application/employees/employees";
 import { listPersons } from "@/application/cash/cash";
-import { getSummary } from "@/application/reports/reports";
+import { getSummary, listLedger } from "@/application/reports/reports";
+import { listBranches } from "@/application/branches/branches";
+import { LedgerFilterBar } from "@/components/ledger-filter-bar";
+import { isFiltered, parseLedgerFilter } from "@/domain/ledger-filter";
 import { PageHeader, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { AccountFlowList } from "@/components/account-flow";
@@ -14,13 +17,23 @@ import { AllocationForm } from "../pool/pool-forms";
 
 export const metadata: Metadata = { title: "Kasse & Bank" };
 
-export default async function CashPage() {
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+export default async function CashPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser("ADMIN");
   const today = todayKey();
-  const [pool, employees, persons, month, day] = await Promise.all([
+  const sp = await searchParams;
+  const filter = parseLedgerFilter(sp);
+  const from = sp.from && DAY.test(sp.from) ? sp.from : undefined;
+  const to = sp.to && DAY.test(sp.to) ? sp.to : undefined;
+  const filtered = isFiltered(filter) || !!from || !!to;
+  const [pool, employees, persons, month, day, branches] = await Promise.all([
     poolOverview(user), listEmployees(user), listPersons(user),
-    getSummary(user, `${monthKey()}-01`, today), getSummary(user, today, today),
+    getSummary(user, `${monthKey()}-01`, today), getSummary(user, today, today), listBranches(user),
   ]);
+  const moneyRows = filtered
+    ? (await listLedger(user, { from, to, filter, limit: 500 })).filter((r) => r.cashDeltaCents !== 0 || r.bankDeltaCents !== 0)
+    : pool.entries;
   const cats = month.summary.totals.expensesByCategory;
   const active = employees.filter((e) => e.isActive);
   const accounts = [
@@ -46,7 +59,8 @@ export default async function CashPage() {
             <dl className="mb-4 space-y-1 rounded-lg bg-paper px-3 py-2 tabular">
               <Row label={`Tageseinnahmen ${a.title}`} cents={a.today.dailyIncomeCents} sign="+" />
               <Row label={`Ausgaben ${a.title}`} cents={a.today.expenseCents} sign="−" />
-              <Row label="Weitere Bewegungen (Rechnungen, Budget, Korrekturen …)" cents={a.today.closingCents - a.today.openingCents - a.today.dailyIncomeCents + a.today.expenseCents} sign="±" />
+              {a.today.priorReversalCents !== 0 && <Row label="Stornos früherer Buchungen" cents={a.today.priorReversalCents} sign="±" />}
+              <Row label="Weitere Bewegungen (Rechnungen, Budget, Korrekturen …)" cents={a.today.closingCents - a.today.openingCents - a.today.dailyIncomeCents + a.today.expenseCents - a.today.priorReversalCents} sign="±" />
             </dl>
             <p className="mb-2 text-sm font-medium text-muted">Laufender Monat</p>
             <AccountFlowList account={a.key} flow={a.month} />
@@ -77,10 +91,10 @@ export default async function CashPage() {
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
         <Section title="Tageseinnahme erfassen">
-          <DailyIncomeForm today={today} persons={persons} />
+          <DailyIncomeForm today={today} persons={persons} branches={branches} />
         </Section>
         <Section title="Ausgabe erfassen (Wareneinkauf / Betriebskosten)">
-          <ExpenseForm today={today} persons={persons} balances={{ CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} />
+          <ExpenseForm today={today} persons={persons} balances={{ CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} branches={branches} />
         </Section>
         <Section title="Bestand korrigieren (Stichtag)">
           <BalanceCorrectionForm today={today} />
@@ -88,17 +102,24 @@ export default async function CashPage() {
       </div>
 
       <Section title="Bewegungen Kasse (Bar) und Bankkonto – je Buchung mit Konto" flush>
-        <LedgerList rows={pool.entries} mode="pool" showEmployee admin />
+        <LedgerFilterBar action="/admin/cash" filter={filter} from={from} to={to} branches={branches} persons={persons}
+          count={filtered ? moneyRows.length : undefined} />
+        <LedgerList rows={moneyRows} mode="pool" showEmployee admin branches={branches}
+          emptyTitle={filtered ? "Keine Buchungen für diesen Filter" : undefined} />
       </Section>
     </>
   );
 }
 
 function Row({ label, cents, sign }: { label: string; cents: number; sign?: "+" | "−" | "±" }) {
+  const prefix = sign === "±" ? "±" : sign === "−" ? "−" : cents < 0 ? null : sign === "+" ? "+" : null;
   return (
     <div className="flex items-baseline justify-between gap-4 text-[15px]">
       <dt className="text-muted">{label}</dt>
-      <dd>{sign && <span className="me-1 text-muted">{sign}</span>}{formatCents(cents)}</dd>
+      <dd className={cents < 0 ? "text-minus" : undefined}>
+        {prefix && <span className="me-1 text-muted">{prefix}</span>}
+        {formatCents(cents)}
+      </dd>
     </div>
   );
 }

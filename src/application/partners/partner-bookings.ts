@@ -1,10 +1,10 @@
 // Gesellschafter-Vorgänge: Mittelherkunft, Begründung, Verrechnungskonto "Vorgelegtes Geld",
 // gezielte Auslagen-Erstattung. Alles append-only, Korrektur nur per Storno.
-import { aliasedTable, and, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { aliasedTable, and, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
-import { ledgerEntries, partnerBookings, partnerOutlayRefunds, users } from "@/infrastructure/db/schema";
+import { branches, ledgerCorrections, ledgerEntries, partnerBookings, partnerOutlayRefunds, users } from "@/infrastructure/db/schema";
 import { storage } from "@/infrastructure/storage";
 import { forbidden, isAppError, notFound, rule } from "@/domain/errors";
 import {
@@ -18,6 +18,7 @@ import { requireRole, tid, type Ctx } from "../context";
 import {
   audit, bankBalance, cashBalance, claimBalance, insertEntry, insufficient, loadPartner, partnerBalance, walletBalance,
 } from "../ledger-service";
+import { assertBranch } from "../branches/assert-branch";
 import { parseReceiptDataUrl } from "../receipts/inline-file";
 import { storeReceiptFile, type UploadFile } from "../receipts/store-file";
 import type { Range } from "../reports/reports";
@@ -43,6 +44,10 @@ export interface PartnerBookingRow {
   status: RefundStatus | null;
   /** Bei Erstattungen: welche Auslagen damit getilgt wurden */
   settles: { outlayId: string; amountCents: number; purpose: string; bookingDate: Date }[];
+  branchId: string | null;
+  branchName: string | null;
+  /** nach "Ändern": vorheriger Betrag */
+  editedFromCents: number | null;
 }
 
 const creator = aliasedTable(users, "creator");
@@ -50,23 +55,36 @@ const reversal = aliasedTable(ledgerEntries, "reversal");
 const refundBooking = aliasedTable(partnerBookings, "refund_booking");
 const refundReversal = aliasedTable(ledgerEntries, "refund_reversal");
 const outlayBooking = aliasedTable(partnerBookings, "outlay_booking");
+const pbLedger = aliasedTable(ledgerEntries, "pb_ledger");
+const pbEdited = aliasedTable(ledgerCorrections, "pb_edited");
+
+type RawBookingRow = Pick<typeof partnerBookings.$inferSelect,
+  "id" | "partnerId" | "kind" | "source" | "amountCents" | "purpose" | "receiptKey" | "bookingDate" | "createdById" | "ledgerEntryId"> & {
+  partnerName: string; createdByName: string; reversalId: string | null;
+  branchId: string | null; branchName: string | null; editedFromCents: number | null;
+};
 
 /** Gesellschafter-Vorgänge inkl. Erstattungsstatus (Stand: jetzt) */
 export async function partnerBookingRows(
-  tx: Tx, tenantId: string, opts: { partnerId?: string; range?: Range; limit?: number } = {},
+  tx: Tx, tenantId: string, opts: { partnerId?: string; range?: Range; limit?: number; includeHidden?: boolean } = {},
 ): Promise<PartnerBookingRow[]> {
-  const rows = await tx.select({
+  const rows: RawBookingRow[] = await tx.select({
     id: partnerBookings.id, partnerId: partnerBookings.partnerId, partnerName: users.name,
     kind: partnerBookings.kind, source: partnerBookings.source, amountCents: partnerBookings.amountCents,
     purpose: partnerBookings.purpose, receiptKey: partnerBookings.receiptKey, bookingDate: partnerBookings.bookingDate,
     createdById: partnerBookings.createdById, createdByName: creator.name,
     ledgerEntryId: partnerBookings.ledgerEntryId, reversalId: reversal.id,
+    branchId: pbLedger.branchId, branchName: branches.name, editedFromCents: pbEdited.previousAmountCents,
   }).from(partnerBookings)
     .innerJoin(users, eq(users.id, partnerBookings.partnerId))
     .innerJoin(creator, eq(creator.id, partnerBookings.createdById))
+    .innerJoin(pbLedger, eq(pbLedger.id, partnerBookings.ledgerEntryId))
+    .leftJoin(branches, eq(branches.id, pbLedger.branchId))
     .leftJoin(reversal, eq(reversal.reversalOfId, partnerBookings.ledgerEntryId))
+    .leftJoin(pbEdited, eq(pbEdited.replacementId, partnerBookings.ledgerEntryId))
     .where(and(
       eq(partnerBookings.tenantId, tenantId),
+      opts.includeHidden ? undefined : sql`not exists (select 1 from "LedgerCorrection" hc where hc."originalId" = ${partnerBookings.ledgerEntryId})`,
       opts.partnerId ? eq(partnerBookings.partnerId, opts.partnerId) : undefined,
       opts.range ? gte(partnerBookings.bookingDate, opts.range.start) : undefined,
       opts.range ? lt(partnerBookings.bookingDate, opts.range.end) : undefined,
@@ -112,8 +130,15 @@ export async function partnerBookingRows(
       ledgerEntryId: r.ledgerEntryId, reversed, refundable, refundedCents, openCents,
       status: refundable && !reversed ? refundStatus(r.amountCents, refundedCents) : null,
       settles: settles.get(r.id) ?? [],
+      branchId: r.branchId, branchName: r.branchName, editedFromCents: r.editedFromCents,
     };
   });
+}
+
+/** Hauptbuch-Text eines Gesellschafter-Vorgangs */
+export function partnerEntryDescription(kind: PartnerKind, source: FundingSource | null, category: string | null, purpose: string) {
+  return [PARTNER_KIND_LABEL[kind], source && FUNDING_LABEL[source], category && categoryLabel(category), purpose.trim()]
+    .filter(Boolean).join(" · ");
 }
 
 interface BookingInput {
@@ -124,6 +149,7 @@ interface BookingInput {
   bookingDate?: string;
   receipt?: { key: string; mime: string; name: string } | null;
   category?: string | null;
+  branchId?: string | null;
 }
 
 async function book(tx: Tx, ctx: Ctx, tenantId: string, partnerId: string, input: BookingInput) {
@@ -151,11 +177,10 @@ async function book(tx: Tx, ctx: Ctx, tenantId: string, partnerId: string, input
 
   const category = isPurchase(input.kind) ? assertCategory(input.category) : null;
   const bookingDate = input.bookingDate ? dateInputToDate(input.bookingDate) : new Date();
+  const branchId = await assertBranch(tx, tenantId, input.branchId);
   const entry = await insertEntry(tx, ctx, tenantId, {
-    type, ...deltas, employeeId: partnerId, bookingDate, category,
-    description: [
-      PARTNER_KIND_LABEL[input.kind], source && FUNDING_LABEL[source], category && categoryLabel(category), input.purpose.trim(),
-    ].filter(Boolean).join(" · "),
+    type, ...deltas, employeeId: partnerId, bookingDate, category, branchId,
+    description: partnerEntryDescription(input.kind, source, category, input.purpose),
   });
   const [b] = await tx.insert(partnerBookings).values({
     tenantId, partnerId, kind: input.kind, source, amountCents: input.amountCents, purpose: input.purpose.trim(),

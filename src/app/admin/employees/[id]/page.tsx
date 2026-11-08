@@ -10,6 +10,7 @@ import { formatCents } from "@/domain/money";
 import { DailyIncomeForm, ExpenseForm } from "@/components/cash-forms";
 import { monthKey, todayKey } from "@/domain/period";
 import { getPersonnelFile } from "@/application/hr/hr";
+import { listBranches } from "@/application/branches/branches";
 import { AllocationForm } from "../../pool/pool-forms";
 import { WalletActions } from "../employee-forms";
 import { HrPanel } from "../hr-panel";
@@ -21,8 +22,8 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const today = todayKey();
   const from = `${monthKey()}-01`;
-  const [emp, pool, report, hr] = await Promise.all([
-    getEmployee(user, id), poolOverview(user), getSummary(user, from, today, id), getPersonnelFile(user, id),
+  const [emp, pool, report, hr, branches] = await Promise.all([
+    getEmployee(user, id), poolOverview(user), getSummary(user, from, today, id), getPersonnelFile(user, id), listBranches(user),
   ]);
   const m = report.summary.employees[0];
   const person = { id: emp.id, name: emp.name, role: "EMPLOYEE" as const, isActive: emp.isActive };
@@ -59,7 +60,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             </div>
           </Section>
           <Section title="Kontobewegungen diesen Monat" flush>
-            <LedgerList rows={report.entries} mode="wallet" admin />
+            <LedgerList rows={report.entries} mode="wallet" admin branches={branches} />
           </Section>
         </div>
         <div className="space-y-6">
@@ -70,10 +71,10 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           </Section>
           <Section title={`Ausgabe / Einkauf durch ${emp.name}`}>
             <ExpenseForm today={today} persons={[]} preset={person} funds={["BUDGET", "CASH", "BANK"]}
-              balances={{ BUDGET: emp.balanceCents, CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} />
+              balances={{ BUDGET: emp.balanceCents, CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} branches={branches} />
           </Section>
           <Section title={`Einnahme über ${emp.name}`}>
-            <DailyIncomeForm today={today} persons={[]} preset={person} />
+            <DailyIncomeForm today={today} persons={[]} preset={person} branches={branches} />
           </Section>
         </div>
       </div>
