@@ -43,7 +43,7 @@ export function BankUpload({ defaultMonth, branches }: { defaultMonth: string; b
     }}>
       <Field label="Monat"><input name="periodMonth" type="month" required defaultValue={defaultMonth} className={inputCls} /></Field>
       <BranchSelect branches={branches} hint="Optional – verbuchte Umsätze werden dieser Filiale zugeordnet" />
-      <Field label="Datei" hint="CSV (CAMT/MT940-Export), OFX/QFX oder PDF-Kontoauszug">
+      <Field label="Datei" hint="Nur Kontoauszug: CSV (CAMT/MT940-Export), OFX/QFX oder PDF-Auszug der Bank – keine einzelne Lieferantenrechnung">
         <input name="file" type="file" accept=".csv,.ofx,.qfx,.txt,.pdf,text/csv,application/pdf,application/x-ofx" required className="text-sm" />
       </Field>
       <label className="flex items-start gap-2 text-sm">

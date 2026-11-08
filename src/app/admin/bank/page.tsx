@@ -2,26 +2,37 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { listBankStatements } from "@/application/bank/bank";
+import { listIncomingBills } from "@/application/incoming-bills";
 import { listBranches } from "@/application/branches/branches";
 import { PageHeader, Section } from "@/components/ui";
+import { BillList } from "@/components/bill-list";
+import { BillUpload } from "@/components/bill-upload";
 import { formatCents } from "@/domain/money";
-import { monthKey } from "@/domain/period";
+import { monthKey, todayKey } from "@/domain/period";
 import { BankUpload } from "./bank-upload";
 
 export const metadata: Metadata = { title: "Kontoauszüge" };
 
 export default async function BankPage({ searchParams }: { searchParams: Promise<{ id?: string }> }) {
   const user = await requireUser("ADMIN");
-  const [statements, branches] = await Promise.all([listBankStatements(user), listBranches(user, { activeOnly: true })]);
+  const [statements, branches, bills] = await Promise.all([
+    listBankStatements(user), listBranches(user, { activeOnly: true }), listIncomingBills(user, { limit: 40 }),
+  ]);
   const sp = await searchParams;
   const { getBankStatement } = await import("@/application/bank/bank");
   const detail = sp.id ? await getBankStatement(user, sp.id) : null;
 
   return (
     <>
-      <PageHeader title="Kontoauszüge & Abgleich" subtitle="CSV, OFX oder PDF hochladen. Grün = schon im Hauptbuch, Verbucht = neu als Einnahme/Ausgabe Bankkonto, Rot = offen, Blau = Geldtransit Bank → Kasse." />
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-        <Section title="Upload">
+      <PageHeader
+        title="Kontoauszüge & Rechnungen"
+        subtitle="Kontoauszug (CSV/OFX/PDF) links. Einzelne Lieferantenrechnung oder Quittung rechts – mit Pflicht-Auswahl Bar oder Bank, nie stillschweigend zugeordnet."
+      />
+      <div className="mb-6 grid gap-6 lg:grid-cols-2">
+        <Section title="Kontoauszug (Bankumsätze)">
+          <p className="mb-3 rounded-lg border border-amber/30 bg-amber-soft px-3 py-2 text-sm text-amber-900">
+            Einzelne Rechnung oder Quittung? Nicht hier – bitte rechts unter „Rechnung / Quittung buchen“ hochladen und den Zahlungskanal wählen.
+          </p>
           <BankUpload defaultMonth={monthKey()} branches={branches} />
           <ul className="mt-4 divide-y divide-line text-sm">
             {statements.map((s) => (
@@ -31,6 +42,11 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
             ))}
           </ul>
         </Section>
+        <Section title="Rechnung / Quittung buchen">
+          <BillUpload today={todayKey()} branches={branches} />
+        </Section>
+      </div>
+      <div className="mb-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <Section title="Ampel">
           {!detail ? <p className="text-sm text-muted">Bitte einen Auszug wählen.</p> : (
             <ul className="divide-y divide-line text-sm">
@@ -53,6 +69,9 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
               ))}
             </ul>
           )}
+        </Section>
+        <Section title="Gebuchte Eingangsrechnungen" actions={<Link href="/admin/invoices?tab=in" className="text-sm text-ledger hover:underline">Alle anzeigen</Link>} flush>
+          <BillList bills={bills} branches={branches} />
         </Section>
       </div>
     </>

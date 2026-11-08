@@ -339,6 +339,35 @@ export const returnSchema = z.object({
 
 export const reverseSchema = z.object({ reason: z.string().trim().min(3).max(300) });
 
+const payKind = z.enum(["CASH", "BANK", "UNPAID"], {
+  errorMap: () => ({ message: "Bitte wählen, wie die Rechnung bezahlt wurde: Bar (Kasse), Karte/Überweisung (Bankkonto) oder noch nicht bezahlt" }),
+});
+
+/** Eingangsrechnung / Quittung: Lieferant, Betrag, Zahlungskanal (Pflicht), Filiale */
+export const incomingBillSchema = z.object({
+  supplier: z.string().trim().min(2, "Lieferant / Rechnungsherkunft fehlt").max(120),
+  amountCents: positiveAmount,
+  paidCents: optionalAmount,
+  payKind,
+  category: expenseCategory,
+  purpose: z.string().trim().max(500).optional().nullable().transform((v) => v?.trim() || null),
+  bookingDate: dateStr.optional(),
+  branchId,
+});
+
+export const payIncomingBillSchema = z.object({
+  payKind: z.enum(["CASH", "BANK"], {
+    errorMap: () => ({ message: "Bitte Zahlungskanal wählen: Bar (Kasse) oder Karte/Überweisung (Bankkonto)" }),
+  }),
+  paidCents: optionalAmount,
+  bookingDate: dateStr.optional(),
+  branchId,
+});
+
+export const cancelIncomingBillSchema = z.object({
+  reason: z.string().trim().min(3, "Grund fehlt (mind. 3 Zeichen)").max(300),
+});
+
 export const receiptFieldsSchema = z.object({
   amountCents: positiveAmount,
   merchant: z.string().trim().min(1).max(200),

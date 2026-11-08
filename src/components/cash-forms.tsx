@@ -191,8 +191,6 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
     if (h.merchant) setPurpose((p) => p.trim() ? p : `${h.merchant} – Einkauf`);
     if (h.date && h.date <= today) setDate(h.date);
     if (h.category) setCategory(h.category);
-    const target = h.payment === "CASH" ? "CASH" : h.payment === "CARD" ? "BANK" : null;
-    if (target && funds.includes(target)) setFund(target);
   }
 
   return (
@@ -227,21 +225,34 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
               ocr.hint.merchant && `Lieferant: ${ocr.hint.merchant}`,
               ocr.hint.amountCents && `Betrag: ${formatCents(ocr.hint.amountCents)}`,
               ocr.hint.date && `Datum: ${dateLabel(ocr.hint.date)}`,
-              ocr.hint.payment && `Zahlung: ${ocr.hint.payment === "CASH" ? "Bar → Ausgaben Kasse (Bar)" : "Karte → Ausgaben Bankkonto"}`,
+              ocr.hint.payment && `Hinweis Zahlung: ${ocr.hint.payment === "CASH" ? "vermutlich Bar" : "vermutlich Karte"} – bitte selbst wählen`,
               ocr.hint.category && `Kategorie: ${EXPENSE_CATEGORIES[ocr.hint.category]}`,
             ].filter(Boolean).join(" · ")}
           </p>
           <button type="button" onClick={() => apply(ocr.hint!)} className={cx(btn.base, btn.primary, btn.sm, "mt-2")}>Vorschlag übernehmen</button>
         </div>
       )}
+      <fieldset className="rounded-lg border-2 border-ink/20 bg-paper p-3">
+        <legend className="px-1 text-sm font-semibold">Wie wurde diese Rechnung bezahlt?</legend>
+        <p className="mb-2 text-xs text-muted">Pflicht – Bar geht auf die Kasse, Karte/Überweisung auf das Bankkonto. Es wird nichts stillschweigend zugeordnet.</p>
+        <div className="space-y-2">
+          {funds.map((f) => (
+            <label key={f} className={cx(
+              "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2",
+              fund === f ? "border-ledger bg-ledger-soft" : "border-line bg-surface hover:border-ink/30",
+            )}>
+              <input type="radio" name="fundRadio" className="mt-1 accent-[var(--color-ledger)]" checked={fund === f} onChange={() => setFund(f)} />
+              <span>
+                <span className="block text-sm font-medium">{f === "CASH" ? "Bar (Kasse)" : f === "BANK" ? "Karte / Überweisung (Bankkonto)" : EXPENSE_CHANNEL[f]}</span>
+                <span className="block text-xs text-muted">
+                  {EXPENSE_CHANNEL[f]}{balances[f] != null ? ` · Bestand ${formatCents(balances[f]!)}` : ""}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Ausgabenkanal (Herkunftskonto)">
-          <select value={fund} onChange={(e) => setFund(e.target.value as typeof fund)} className={inputCls}>
-            {funds.map((f) => (
-              <option key={f} value={f}>{EXPENSE_CHANNEL[f]}{balances[f] != null ? ` · Bestand ${formatCents(balances[f]!)}` : ""}</option>
-            ))}
-          </select>
-        </Field>
         <CategoryField value={category} onChange={setCategory} />
         <Field label="Betrag"><input name="amount" value={amount} onChange={(e) => setAmount(e.target.value)} required inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} /></Field>
         <Field label="Datum"><input name="bookingDate" type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>

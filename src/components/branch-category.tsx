@@ -7,17 +7,17 @@ import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_KEYS, isFixedCategory } from "@/do
 export interface BranchOption { id: string; name: string; city?: string | null; isActive?: boolean }
 
 /** Filiale / Standort – erscheint nur, wenn Filialen angelegt sind */
-export function BranchSelect({ branches, name = "branchId", value, onChange, defaultValue, label = "Filiale / Standort", hint, className }: {
+export function BranchSelect({ branches, name = "branchId", value, onChange, defaultValue, label = "Filiale / Standort", hint, className, required }: {
   branches?: BranchOption[]; name?: string; value?: string; onChange?: (v: string) => void; defaultValue?: string | null;
-  label?: string; hint?: string; className?: string;
+  label?: string; hint?: string; className?: string; required?: boolean;
 }) {
   const active = (branches ?? []).filter((b) => b.isActive !== false || b.id === (value ?? defaultValue));
   if (!active.length) return null;
   const ctrl = value !== undefined ? { value, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => onChange?.(e.target.value) } : { defaultValue: defaultValue ?? "" };
   return (
     <Field label={label} hint={hint} className={className}>
-      <select name={name} {...ctrl} className={inputCls}>
-        <option value="">– keine Filiale (zentral) –</option>
+      <select name={name} required={required} {...ctrl} className={inputCls}>
+        <option value="">{required ? "Bitte Filiale wählen …" : "– keine Filiale (zentral) –"}</option>
         {active.map((b) => <option key={b.id} value={b.id}>{b.name}{b.city && b.city !== b.name ? ` (${b.city})` : ""}</option>)}
       </select>
     </Field>

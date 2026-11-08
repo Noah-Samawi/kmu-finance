@@ -129,9 +129,9 @@ async function main() {
   check((await A.post("/api/v1/pool/income", { amountCents: "500,00", description: "Barverkauf Tageskasse" })).status === 201, "Manuelle Einnahme 500 €");
   pool = (await A.get("/api/v1/pool")).data.poolBalanceCents;
   check(pool === 288535, "Pool = 2.885,35 €");
-  const tooMuch = await A.post("/api/v1/pool/allocations", { employeeId: e1, amountCents: pool + 1 });
+  const tooMuch = await A.post("/api/v1/pool/allocations", { employeeId: e1, amountCents: pool + 1, description: "zu viel", accountKind: "BANK" });
   check(tooMuch.status === 422, "Zuteilung über Pool hinaus blockiert");
-  check((await A.post("/api/v1/pool/allocations", { employeeId: e1, amountCents: "1.000,00" })).data.walletBalanceCents === 100000, "1.000 € an Max zugeteilt");
+  check((await A.post("/api/v1/pool/allocations", { employeeId: e1, amountCents: "1.000,00", description: "Budget Max", accountKind: "BANK" })).data.walletBalanceCents === 100000, "1.000 € an Max zugeteilt");
   check((await A.get("/api/v1/pool")).data.poolBalanceCents === 188535, "Rest-Kassenbestand = Einnahmen − Budgets");
 
   console.log("\nModul C: Belege & Mitarbeiter-Konto");
@@ -145,6 +145,7 @@ async function main() {
   check(over.status === 422, "Beleg über Guthaben blockiert (kein Minus)");
   check((await M.get("/api/v1/employees")).status === 403, "Mitarbeiter: keine Mitarbeiterliste");
   check((await M.get("/api/v1/invoices")).status === 403, "Mitarbeiter: keine Rechnungen");
+  check((await M.post("/api/v1/bills")).status === 403, "Mitarbeiter: keine Eingangsrechnungen");
   check((await M.get("/api/v1/pool")).status === 403, "Mitarbeiter: kein Pool");
   check((await M.post("/api/v1/pool/allocations", { employeeId: e1, amountCents: 100 })).status === 403, "Mitarbeiter kann sich nichts zuteilen");
   check((await M.post(`/api/v1/employees/${e1}/adjust`, { toZero: true, description: "hack" })).status === 403, "Mitarbeiter kann keine Ausgleiche buchen");
@@ -200,6 +201,36 @@ async function main() {
   check((await B.post("/api/v1/pool/allocations", { employeeId: e1, amountCents: 1 })).status === 404, "Admin B kann A-Mitarbeiter kein Budget geben");
   check((await B.get("/api/v1/ledger")).data.entries.every((e: any) => !e.employeeId || e.employeeId !== e1), "Journal B enthält keine A-Buchungen");
   check((await B.get(`/api/v1/receipts/${r3.data.receipt.id}/file`)).status === 404, "Admin B kann Belegfoto von A nicht laden");
+
+  console.log("\nEingangsrechnungen");
+  async function bill(c: Client, fields: Record<string, string>, seed: string) {
+    const f = new FormData();
+    f.set("file", fakePng(seed), "rechnung.png");
+    for (const [k, v] of Object.entries(fields)) f.set(k, v);
+    return c.req("POST", "/api/v1/bills", f, true);
+  }
+  check((await A.post("/api/v1/pool/income", { amountCents: "200,00", description: "Reserve Belege Bar", accountKind: "CASH" })).status === 201, "Reserve Kasse für Belege");
+  check((await A.post("/api/v1/pool/income", { amountCents: "50,00", description: "Reserve Belege Bank", accountKind: "BANK" })).status === 201, "Reserve Bank für Belege");
+  const openBill = await bill(A, { supplier: "Metro", amount: "50,00", payKind: "UNPAID", category: "WAREN", purpose: "Wareneinkauf" }, "b-open");
+  check(openBill.status === 201 && openBill.data.bill.status === "OPEN", "Offene Eingangsrechnung ohne Buchung");
+  check(openBill.data.bill.bookedLabel === "Noch nicht gebucht", "Unbezahlt: Herkunft noch nicht gebucht");
+  check(String(openBill.data.bill.statusLabel).includes("50,00"), "Status zeigt offenen Betrag");
+  const cashBill = await bill(A, { supplier: "Metro", amount: "12,00", payKind: "CASH", category: "WAREN" }, "b-cash");
+  check(cashBill.status === 201 && cashBill.data.bill.status === "PAID" && cashBill.data.bill.bookedLabel === "Ausgabe Kasse (Bar)", "Bar → Ausgabe Kasse (Bar), komplett bezahlt");
+  check((await bill(A, { supplier: "X", amount: "1,00", payKind: "CASH", category: "WAREN" }, "b-cash")).status === 409, "Gleiche Datei doppelt → 409");
+  check((await bill(A, { supplier: "Y", amount: "1,00", category: "WAREN" }, "b-nopay")).status === 400, "Ohne Zahlungskanal abgelehnt");
+  const partial = await bill(A, { supplier: "Stadtwerke", amount: "20,00", paid: "8,00", payKind: "BANK", category: "ENERGIE" }, "b-part");
+  check(partial.status === 201 && partial.data.bill.status === "OPEN" && partial.data.bill.dueCents === 1200, "Teilzahlung Bank: noch 12 € offen");
+  check(partial.data.bill.bookedLabel === "Ausgabe Bankkonto", "Teilzahlung bleibt Ausgabe Bankkonto");
+  const credit = await bill(A, { supplier: "Rewe", amount: "10,00", paid: "15,00", payKind: "CASH", category: "WAREN" }, "b-credit");
+  check(credit.status === 201 && credit.data.bill.status === "CREDIT", "Überzahlung → Guthaben vorhanden");
+  const paidOpen = await A.post(`/api/v1/bills/${openBill.data.bill.id}/pay`, { payKind: "CASH" });
+  check(paidOpen.status === 201 && paidOpen.data.bill.status === "PAID" && paidOpen.data.bill.bookedLabel === "Ausgabe Kasse (Bar)", "Offene Rechnung nachträglich Bar bezahlen");
+  const listed = await A.get("/api/v1/bills?q=Metro");
+  check(listed.data.bills.some((b: { supplier: string }) => b.supplier === "Metro"), "Suche nach Lieferant Metro");
+  check((await B.get("/api/v1/bills")).data.bills.length === 0, "Mandant B sieht Eingangsrechnungen von A nicht");
+  check((await M.get("/api/v1/bills")).status === 403, "Mitarbeiter sieht keine Eingangsrechnungen");
+  check((await A.get(`/api/v1/bills/${cashBill.data.bill.id}/file`)).status === 200, "Belegdatei der Eingangsrechnung abrufbar");
 
   console.log("\nModul D: Berichte & Abschlüsse");
   const today = new Date().toISOString().slice(0, 10);

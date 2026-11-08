@@ -304,6 +304,36 @@ export const ledgerCorrections = pgTable("LedgerCorrection", {
   createdAt: createdAt(),
 });
 
+/** Lieferantenrechnung / Quittung: Zahlungskanal ist Pflicht, Status aus Betrag vs. gezahlt. */
+export const incomingBills = pgTable("IncomingBill", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  supplier: text("supplier").notNull(),
+  amountCents: integer("amountCents").notNull(),
+  paidCents: integer("paidCents").notNull().default(0),
+  /** CASH | BANK | UNPAID – wie die Rechnung bezahlt wurde (nie implizit) */
+  payKind: text("payKind").notNull(),
+  /** gebuchtes Herkunftskonto, null solange unbezahlt */
+  fund: accountKindEnum("fund"),
+  category: text("category"),
+  purpose: text("purpose"),
+  bookingDate: timestamp("bookingDate", { withTimezone: true }).notNull(),
+  branchId: text("branchId").references(() => branches.id),
+  fileKey: text("fileKey"),
+  fileMime: text("fileMime"),
+  fileName: text("fileName"),
+  fileSha256: text("fileSha256"),
+  ledgerEntryId: text("ledgerEntryId").unique().references(() => ledgerEntries.id),
+  canceledAt: timestamp("canceledAt", { withTimezone: true }),
+  cancelReason: text("cancelReason"),
+  createdById: text("createdById").notNull().references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index("IncomingBill_tenant_date_idx").on(t.tenantId, t.bookingDate),
+  index("IncomingBill_tenant_supplier_idx").on(t.tenantId, t.supplier),
+]);
+
 // Gesellschafter-Vorgänge mit Mittelherkunft und Begründung (unveränderlich, 1:1 zum Hauptbuch)
 export const partnerBookings = pgTable("PartnerBooking", {
   id: id(),

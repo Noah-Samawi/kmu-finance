@@ -95,6 +95,12 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
         </Section>
         <Section title="Ausgabe erfassen (Wareneinkauf / Betriebskosten)">
           <ExpenseForm today={today} persons={persons} balances={{ CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} branches={branches} />
+          <p className="mt-3 text-xs text-muted">
+            Lieferantenrechnung mit Status Offen / Bezahlt / Guthaben?{" "}
+            <a href="/admin/invoices?tab=in" className="text-ledger hover:underline">Eingangsrechnung hochladen</a>
+            {" · "}
+            <a href="/admin/bank" className="text-ledger hover:underline">oder unter Kontoauszüge</a>
+          </p>
         </Section>
         <Section title="Bestand korrigieren (Stichtag)">
           <BalanceCorrectionForm today={today} />
