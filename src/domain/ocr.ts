@@ -1,6 +1,6 @@
 // Auswertung von OCR-Text (Kassenbon, Rechnung): Lieferant, Betrag, Datum, Zahlungsart → Buchungsvorschlag.
 // Die Texterkennung selbst läuft im Browser (Foto: Tesseract, PDF: Textebene/Tesseract).
-import { guessCategory, type ExpenseCategory } from "./cash";
+import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_KEYS, guessCategory, type ExpenseCategory } from "./cash";
 
 export type PaymentKind = "CASH" | "CARD";
 
@@ -80,6 +80,88 @@ function pickVat(text: string): number | null {
   if (/\b19[,.]?0{0,2}\s?%/.test(text)) return 1900;
   if (/\b7[,.]?0{0,2}\s?%/.test(text)) return 700;
   return null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// KI-Beleglesung (Gemini): rohe JSON-Antwort prüfen und in einen Buchungsvorschlag umwandeln.
+// Die KI liefert nur Vorschläge – gebucht wird erst nach Bestätigung durch den Nutzer.
+// ---------------------------------------------------------------------------------------------
+
+/** Maximale Dateigröße für den Scan (Vercel-Funktionen nehmen max. ~4,5 MB Request-Body an) */
+export const SCAN_MAX_BYTES = 4 * 1024 * 1024;
+export const SCAN_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"] as const;
+
+export interface ScanResult extends ReceiptSuggestion {
+  /** Kurze Beschreibung des Einkaufs */
+  description: string | null;
+  vatAmountCents: number | null;
+  /** Eigene Kategorie (Freitext), wenn keine der festen Kategorien passt, z. B. "Treibstoff" */
+  customCategory: string | null;
+  source: "gemini" | "local";
+}
+
+/** Kategorien, die der Prompt der KI anbietet: feste Kategorien + Treibstoff (wird als eigene Kategorie gebucht) */
+export const SCAN_CATEGORY_LABELS = [...EXPENSE_CATEGORY_KEYS.map((k) => EXPENSE_CATEGORIES[k]), "Treibstoff"] as const;
+
+const CUSTOM_TREIBSTOFF = "Treibstoff";
+// ältere/Kurz-Bezeichnungen, die die KI trotz Vorgabe liefern kann
+const CATEGORY_ALIASES: Record<string, ExpenseCategory | typeof CUSTOM_TREIBSTOFF> = {
+  "wareneinkauf": "WAREN", "wareneinkauf (lebensmittel)": "WAREN", "lebensmittel": "WAREN",
+  "treibstoff": CUSTOM_TREIBSTOFF, "tankstelle": CUSTOM_TREIBSTOFF, "kraftstoff": CUSTOM_TREIBSTOFF, "benzin": CUSTOM_TREIBSTOFF, "diesel": CUSTOM_TREIBSTOFF,
+  "betriebsbedarf": "AUSSTATTUNG", "sonstiges": "SONSTIGES",
+};
+
+function toCents(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v.replace(/\s/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".")) : NaN;
+  if (!Number.isFinite(n) || n <= 0 || n >= 1_000_000) return null;
+  return Math.round(n * 100);
+}
+
+function validIsoDate(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const m = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (y < 2000 || y > 2100 || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return m[0];
+}
+
+const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.replace(/\s+/g, " ").trim().slice(0, max) : null);
+
+export function scanResultFromJson(raw: unknown): ScanResult {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const merchant = str(r.merchant, 60);
+  const description = str(r.description, 200);
+  const amountCents = toCents(r.totalGross);
+  const vatNum = Number(r.vatRate);
+  const vatRate = vatNum === 19 ? 1900 : vatNum === 7 ? 700 : null;
+  let vatAmountCents = toCents(r.vatAmount);
+  if (vatAmountCents !== null && amountCents !== null && vatAmountCents >= amountCents) vatAmountCents = null;
+
+  let category: ExpenseCategory | null = null;
+  let customCategory: string | null = null;
+  const catText = str(r.category, 80);
+  if (catText) {
+    const norm = catText.toLowerCase();
+    const byKey = EXPENSE_CATEGORY_KEYS.find((k) => k.toLowerCase() === norm);
+    const byLabel = EXPENSE_CATEGORY_KEYS.find((k) => EXPENSE_CATEGORIES[k].toLowerCase() === norm);
+    const alias = CATEGORY_ALIASES[norm];
+    const hit = byKey ?? byLabel ?? alias;
+    if (hit === CUSTOM_TREIBSTOFF) customCategory = CUSTOM_TREIBSTOFF;
+    else if (hit) category = hit;
+  }
+  // "Sonstiges" ist keine Aussage – lieber die Händler-Heuristik versuchen
+  if ((!category && !customCategory) || category === "SONSTIGES") {
+    category = guessCategory(`${merchant ?? ""} ${description ?? ""}`) ?? category;
+  }
+  const pay = typeof r.paymentMethod === "string" ? r.paymentMethod.toUpperCase() : "";
+  return {
+    merchant, description, amountCents, vatRate, vatAmountCents, category, customCategory,
+    date: validIsoDate(r.date),
+    payment: pay === "CASH" ? "CASH" : pay === "CARD" ? "CARD" : null,
+    source: "gemini",
+  };
 }
 
 export function parseReceiptText(text: string): ReceiptSuggestion {

@@ -1,8 +1,11 @@
 "use client";
 
-// Texterkennung im Browser: Fotos per Tesseract (Deutsch), PDFs über den Textlayer (Scans: Seite rendern + OCR).
-// Es verlässt keine Datei das Gerät – erkannt wird lokal, gebucht wird erst nach Bestätigung.
-import { parseReceiptText, type ReceiptSuggestion } from "@/domain/ocr";
+// Belegerkennung: zuerst KI (Google Gemini über /api/scan-receipt, liest Foto und PDF direkt).
+// Ist die KI nicht erreichbar/nicht eingerichtet, Rückfall auf lokale Texterkennung im Browser:
+// Fotos per Tesseract (Deutsch), PDFs über den Textlayer (Scans: Seite rendern + OCR).
+// Gebucht wird in jedem Fall erst nach Bestätigung durch den Nutzer.
+import { parseReceiptText, SCAN_MAX_BYTES, SCAN_MIME_TYPES, type ScanResult } from "@/domain/ocr";
+import { shrinkImage } from "@/components/shrink-image";
 
 type PdfJs = typeof import("pdfjs-dist");
 let pdfjsPromise: Promise<PdfJs> | null = null;
@@ -60,8 +63,29 @@ async function pdfFirstPageCanvas(file: File): Promise<HTMLCanvasElement> {
   return canvas;
 }
 
-/** Beleg (Foto oder PDF) lesen → Lieferant, Betrag, Datum, Zahlungsart (Bar/Karte), MwSt, Kategorie */
-export async function recognizeReceipt(file: File, onProgress?: (p: number) => void): Promise<ReceiptSuggestion & { text: string }> {
+export type RecognizedReceipt = ScanResult & { text: string };
+
+/** KI-Scan über den Server; null = nicht verfügbar (dann lokal weiter) */
+async function scanWithAi(file: File): Promise<ScanResult | null> {
+  try {
+    const f = await shrinkImage(file);
+    if (f.size > SCAN_MAX_BYTES || !(SCAN_MIME_TYPES as readonly string[]).includes(f.type)) return null;
+    const fd = new FormData();
+    fd.set("file", f);
+    const res = await fetch("/api/scan-receipt", { method: "POST", body: fd });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { scan?: ScanResult };
+    return data.scan ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Beleg (Foto oder PDF) lesen → Händler, Betrag, Datum, MwSt, Kategorie, Zahlungsart (Hinweis) */
+export async function recognizeReceipt(file: File, onProgress?: (p: number) => void): Promise<RecognizedReceipt> {
+  const ai = await scanWithAi(file);
+  if (ai && (ai.amountCents || ai.merchant)) return { ...ai, text: "" };
+
   let text = "";
   if (isPdf(file)) {
     text = (await pdfText(file, 3)).text;
@@ -69,5 +93,5 @@ export async function recognizeReceipt(file: File, onProgress?: (p: number) => v
   } else {
     text = await ocrImage(file, onProgress);
   }
-  return { ...parseReceiptText(text), text };
+  return { ...parseReceiptText(text), description: null, vatAmountCents: null, customCategory: null, source: "local", text };
 }

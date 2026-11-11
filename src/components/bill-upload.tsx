@@ -94,7 +94,7 @@ export function BillUpload({ today, branches, compact }: { today: string; branch
           if (f) analyse(f); else setOcr({ busy: false, progress: 0, hint: null, error: null });
         }} />
       </Field>
-      {ocr.busy && <p className="text-sm text-muted">{`Beleg wird gelesen … ${Math.round(ocr.progress * 100)} %`}</p>}
+      {ocr.busy && <p className="text-sm text-muted">Beleg wird analysiert …</p>}
       {ocr.error && <p className="text-sm text-amber-700">{ocr.error}</p>}
       {ocr.hint && (ocr.hint.amountCents || ocr.hint.merchant) && (
         <div className="rounded-lg border border-ledger/30 bg-ledger-soft px-3 py-2 text-sm">

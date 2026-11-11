@@ -9,25 +9,9 @@ import { VatSelect } from "@/components/vat-select";
 import { formatCents, parseEuroToCents } from "@/domain/money";
 import { fmtDate } from "@/domain/period";
 import type { ReceiptSuggestion } from "@/domain/ocr";
+import { shrinkImage } from "@/components/shrink-image";
 
 const MAX_BYTES = 10 * 1024 * 1024;
-
-/** Große Handyfotos vor dem Upload verkleinern (spart Datenvolumen, bleibt gut lesbar) */
-async function shrinkImage(file: File): Promise<File> {
-  if (!file.type.startsWith("image/") || file.type === "image/heic" || file.type === "image/heif" || file.size < 1.5 * 1024 * 1024) return file;
-  try {
-    const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bmp.width * scale);
-    canvas.height = Math.round(bmp.height * scale);
-    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.85));
-    return blob ? new File([blob], "beleg.jpg", { type: "image/jpeg" }) : file;
-  } catch {
-    return file;
-  }
-}
 
 export function ReceiptUpload({ balanceCents, today, branches }: { balanceCents: number; today: string; branches?: BranchOption[] }) {
   const router = useRouter();
@@ -114,7 +98,7 @@ export function ReceiptUpload({ balanceCents, today, branches }: { balanceCents:
         )}
       </button>
       {file && <button type="button" onClick={() => inputRef.current?.click()} className="text-sm font-medium text-ledger">Anderes Foto wählen</button>}
-      {ocr.busy && <p className="text-sm text-muted">{`Beleg wird gelesen … ${Math.round(ocr.progress * 100)} %`}</p>}
+      {ocr.busy && <p className="text-sm text-muted">Beleg wird analysiert …</p>}
       {ocr.hint && (ocr.hint.amountCents || ocr.hint.merchant) && (
         <p className="rounded-lg border border-ledger/30 bg-ledger-soft px-3 py-2 text-sm">
           {`Erkannt: ${[ocr.hint.merchant, ocr.hint.amountCents && formatCents(ocr.hint.amountCents), ocr.hint.date && fmtDate(new Date(ocr.hint.date + "T12:00:00Z")), ocr.hint.payment === "CASH" ? "Bar" : ocr.hint.payment === "CARD" ? "Karte" : null].filter(Boolean).join(" · ")} – bitte prüfen.`}

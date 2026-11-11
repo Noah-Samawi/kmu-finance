@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { btn, cx, Field, inputCls } from "@/components/ui";
 import { ErrorNote, useApi } from "@/components/use-api";
 import { EXPENSE_CATEGORIES, FUND_LABEL, type ExpenseFund } from "@/domain/cash";
-import type { ReceiptSuggestion } from "@/domain/ocr";
+import type { ScanResult } from "@/domain/ocr";
+import { ReceiptCapture } from "./receipt-capture";
 import { BranchSelect, CategoryField, type BranchOption } from "./branch-category";
 import { REASON_MIN_WITHOUT_RECEIPT } from "@/domain/partner";
 import { formatCents, parseEuroToCents } from "@/domain/money";
@@ -159,10 +160,15 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
 
 const centsToInput = (c: number) => (c / 100).toFixed(2).replace(".", ",");
 
-/** Gastro-Ausgabe: Wareneinkauf / Betriebskosten mit Herkunftskonto, Kategorie, Filiale und Beleg (mit Belegerkennung) */
-export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], balances = {}, branches }: {
+/**
+ * Gastro-Ausgabe: Wareneinkauf / Betriebskosten mit Herkunftskonto, Kategorie, Filiale und Beleg.
+ * Beleg per Kamera oder Datei → KI liest Datum, Händler, Betrag, Kategorie und füllt das Formular aus;
+ * das Foto wird mit der Buchung gespeichert. initialFile: Scan wurde schon außerhalb gestartet (z. B. "Belege prüfen").
+ */
+export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], balances = {}, branches, initialFile, onBooked }: {
   today: string; persons: PersonOption[]; preset?: PersonOption | null;
   funds?: Exclude<ExpenseFund, "CAPITAL">[]; balances?: Partial<Record<ExpenseFund, number>>; branches?: BranchOption[];
+  initialFile?: File | null; onBooked?: () => void;
 }) {
   const { call, busy, error, setError } = useApi();
   const [fund, setFund] = useState(funds[0]);
@@ -171,27 +177,53 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
   const [purpose, setPurpose] = useState("");
   const [date, setDate] = useState(today);
   const [category, setCategory] = useState("WAREN");
-  const [ocr, setOcr] = useState<{ busy: boolean; progress: number; hint: (ReceiptSuggestion & { text: string }) | null; error: string | null }>(
-    { busy: false, progress: 0, hint: null, error: null },
+  const autoPurpose = useRef("");
+  const started = useRef(false);
+  const [ocr, setOcr] = useState<{ busy: boolean; hint: (ScanResult & { text: string }) | null; error: string | null }>(
+    { busy: false, hint: null, error: null },
   );
 
-  async function analyse(f: File) {
-    setOcr({ busy: true, progress: 0, hint: null, error: null });
-    try {
-      const { recognizeReceipt } = await import("./ocr");
-      const hint = await recognizeReceipt(f, (p) => setOcr((o) => ({ ...o, progress: p })));
-      setOcr({ busy: false, progress: 1, hint, error: hint.amountCents || hint.merchant ? null : "Kein Betrag erkannt – bitte manuell erfassen" });
-    } catch {
-      setOcr({ busy: false, progress: 0, hint: null, error: "Belegerkennung nicht möglich – bitte manuell erfassen" });
+  /** Erkannte Werte direkt eintragen – der Nutzer gleicht nur noch mit dem Foto ab */
+  function fill(h: ScanResult) {
+    if (h.amountCents) setAmount(centsToInput(h.amountCents));
+    if (h.date && h.date <= today) setDate(h.date);
+    const cat = h.customCategory ?? h.category;
+    if (cat) setCategory(cat);
+    const text = h.merchant ? (h.description ? `${h.merchant} – ${h.description}` : `${h.merchant} – Einkauf`) : h.description ?? "";
+    if (text) {
+      // eigene Eingaben nicht überschreiben; frühere automatische Texte schon
+      setPurpose((p) => (!p.trim() || p === autoPurpose.current ? text : p));
+      autoPurpose.current = text;
     }
   }
 
-  function apply(h: ReceiptSuggestion) {
-    if (h.amountCents) setAmount(centsToInput(h.amountCents));
-    if (h.merchant) setPurpose((p) => p.trim() ? p : `${h.merchant} – Einkauf`);
-    if (h.date && h.date <= today) setDate(h.date);
-    if (h.category) setCategory(h.category);
+  async function analyse(f: File) {
+    setOcr({ busy: true, hint: null, error: null });
+    try {
+      const { recognizeReceipt } = await import("./ocr");
+      const hint = await recognizeReceipt(f);
+      const found = !!(hint.amountCents || hint.merchant);
+      if (found) fill(hint);
+      setOcr({
+        busy: false, hint,
+        error: !found ? "Kein Betrag erkannt – bitte manuell erfassen"
+          : hint.source === "local" ? "Die KI-Erkennung war nicht erreichbar – einfache Texterkennung verwendet. Bitte genau prüfen." : null,
+      });
+    } catch {
+      setOcr({ busy: false, hint: null, error: "Belegerkennung nicht möglich – bitte manuell erfassen" });
+    }
   }
+
+  function onFile(f: File | null) {
+    setFile(f);
+    setError(null);
+    if (f) analyse(f); else setOcr({ busy: false, hint: null, error: null });
+  }
+
+  useEffect(() => {
+    if (initialFile && !started.current) { started.current = true; onFile(initialFile); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
 
   return (
     <form className="space-y-3" onSubmit={async (e) => {
@@ -204,32 +236,26 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
       }
       fd.set("fund", fund);
       if (await call("POST", "/api/v1/cash/expenses", fd)) {
-        form.reset(); setFile(null); setAmount(""); setPurpose(""); setDate(today); setCategory("WAREN");
-        setOcr({ busy: false, progress: 0, hint: null, error: null });
+        form.reset(); setFile(null); setAmount(""); setPurpose(""); setDate(today); setCategory("WAREN"); autoPurpose.current = "";
+        setOcr({ busy: false, hint: null, error: null });
+        onBooked?.();
       }
     }}>
-      <Field label="Beleg (Foto oder PDF)" hint="Optional – Lieferant, Betrag, Datum und Bar/Karte werden automatisch erkannt">
-        <input name="file" type="file" accept="image/*,application/pdf" className="block w-full text-sm" onChange={(e) => {
-          const f = e.target.files?.[0] ?? null;
-          setFile(f);
-          if (f) analyse(f); else setOcr({ busy: false, progress: 0, hint: null, error: null });
-        }} />
-      </Field>
-      {ocr.busy && <p className="text-sm text-muted">{`Beleg wird gelesen … ${Math.round(ocr.progress * 100)} %`}</p>}
+      <ReceiptCapture file={file} onFile={onFile} onError={setError} analysing={ocr.busy} />
       {ocr.error && <p className="text-sm text-amber-700">{ocr.error}</p>}
-      {ocr.hint && (ocr.hint.amountCents || ocr.hint.merchant) && (
+      {ocr.hint && (ocr.hint.amountCents || ocr.hint.merchant) && !ocr.busy && (
         <div className="rounded-lg border border-ledger/30 bg-ledger-soft px-3 py-2 text-sm">
-          <p className="font-medium">Buchungsvorschlag aus dem Beleg</p>
+          <p className="font-medium">Beleg erkannt – bitte mit dem Foto abgleichen</p>
           <p className="text-muted">
             {[
-              ocr.hint.merchant && `Lieferant: ${ocr.hint.merchant}`,
+              ocr.hint.merchant && `Händler: ${ocr.hint.merchant}`,
               ocr.hint.amountCents && `Betrag: ${formatCents(ocr.hint.amountCents)}`,
               ocr.hint.date && `Datum: ${dateLabel(ocr.hint.date)}`,
+              ocr.hint.vatRate && `MwSt ${ocr.hint.vatRate / 100} %${ocr.hint.vatAmountCents ? ` (${formatCents(ocr.hint.vatAmountCents)})` : ""}`,
+              (ocr.hint.customCategory || ocr.hint.category) && `Kategorie: ${ocr.hint.customCategory ?? EXPENSE_CATEGORIES[ocr.hint.category!]}`,
               ocr.hint.payment && `Hinweis Zahlung: ${ocr.hint.payment === "CASH" ? "vermutlich Bar" : "vermutlich Karte"} – bitte selbst wählen`,
-              ocr.hint.category && `Kategorie: ${EXPENSE_CATEGORIES[ocr.hint.category]}`,
             ].filter(Boolean).join(" · ")}
           </p>
-          <button type="button" onClick={() => apply(ocr.hint!)} className={cx(btn.base, btn.primary, btn.sm, "mt-2")}>Vorschlag übernehmen</button>
         </div>
       )}
       <fieldset className="rounded-lg border-2 border-ink/20 bg-paper p-3">
@@ -267,7 +293,7 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
         <BranchSelect branches={branches} />
       </div>
       <ErrorNote error={error} />
-      <button disabled={busy || ocr.busy} className={cx(btn.base, btn.primary, "w-full")}>Ausgabe buchen</button>
+      <button disabled={busy || ocr.busy} className={cx(btn.base, btn.primary, "w-full")}>{ocr.busy ? "Beleg wird analysiert …" : "Speichern / Buchen"}</button>
     </form>
   );
 }

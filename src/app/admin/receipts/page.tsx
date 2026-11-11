@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { listReceipts } from "@/application/receipts/receipts";
+import { listPersons } from "@/application/cash/cash";
+import { listBranches } from "@/application/branches/branches";
+import { poolOverview } from "@/application/pool/pool";
 import { cx, Empty, Money, PageHeader, Pill, Section } from "@/components/ui";
-import { fmtDate, fmtDateTime } from "@/domain/period";
+import { fmtDate, fmtDateTime, todayKey } from "@/domain/period";
 import { ReviewButtons } from "./review-buttons";
+import { ScanLauncher } from "./scan-launcher";
 
 export const metadata: Metadata = { title: "Belege prüfen" };
 
@@ -18,11 +22,15 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
   const user = await requireUser("ADMIN");
   const sp = await searchParams;
   const status = TABS.find((t) => t.key === sp.status)?.key ?? "SUBMITTED";
-  const receipts = await listReceipts(user, { status });
+  const [receipts, persons, branches, pool] = await Promise.all([
+    listReceipts(user, { status }), listPersons(user), listBranches(user), poolOverview(user),
+  ]);
 
   return (
     <>
       <PageHeader title="Belege prüfen" subtitle="Belege sind beim Einreichen schon vom Guthaben abgezogen. Ablehnen bucht den Betrag zurück." />
+      <ScanLauncher today={todayKey()} persons={persons} branches={branches}
+        balances={{ CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} />
       <div className="mb-4 flex gap-2">
         {TABS.map((t) => (
           <Link key={t.key} href={`/admin/receipts?status=${t.key}`}
