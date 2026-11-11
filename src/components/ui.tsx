@@ -78,8 +78,8 @@ export function Section({ title, actions, children, className, flush }: { title?
   return (
     <section className={cx("rounded-xl border border-line bg-surface", className)}>
       {(title || actions) && (
-        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 md:px-5">
-          {title && <h2 className="font-semibold">{title}</h2>}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 md:px-5">
+          {title && <h2 className="min-w-0 flex-1 font-semibold">{title}</h2>}
           {actions}
         </div>
       )}
@@ -98,13 +98,14 @@ export function Empty({ title, children }: { title: string; children?: React.Rea
 }
 
 /** Tabelle, die auf dem Handy horizontal scrollt statt zu quetschen */
-export function Table({ head, children }: { head: React.ReactNode[]; children: React.ReactNode }) {
+/** hideBelowMd: Spaltenindizes, die auf dem Handy ausgeblendet werden (Zellen brauchen dieselbe Klasse "hidden md:table-cell") */
+export function Table({ head, children, hideBelowMd }: { head: React.ReactNode[]; children: React.ReactNode; hideBelowMd?: number[] }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] text-sm">
+      <table className={cx("w-full text-sm", hideBelowMd ? "md:min-w-[560px]" : "min-w-[560px]")}>
         <thead>
           <tr className="border-b border-line text-start text-muted">
-            {head.map((h, i) => <th key={i} className="px-4 py-2.5 font-medium first:ps-4 md:first:ps-5">{h}</th>)}
+            {head.map((h, i) => <th key={i} className={cx("px-4 py-2.5 font-medium first:ps-4 md:first:ps-5", hideBelowMd?.includes(i) && "hidden md:table-cell")}>{h}</th>)}
           </tr>
         </thead>
         <tbody className="divide-y divide-line">{children}</tbody>

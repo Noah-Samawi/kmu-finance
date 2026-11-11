@@ -56,6 +56,12 @@ export const tenantUpdateSchema = tenantCreateSchema
   .partial()
   .extend({ status: z.enum(["ACTIVE", "SUSPENDED"]).optional() });
 
+/** Super-Admin: Passwort des ersten Firmen-Admins setzen (leer = zufällig erzeugen) */
+export const tenantAdminPasswordSchema = z.object({ password: passwordSchema.optional() });
+
+/** Super-Admin: Firma löschen – Kurzname oder LÖSCHEN zur Bestätigung */
+export const tenantDeleteSchema = z.object({ confirm: z.string().trim().min(1, "Bestätigung fehlt").max(80) });
+
 export const employeeCreateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().toLowerCase().email(),
@@ -397,6 +403,8 @@ export const rangeSchema = z.object({
   from: dateStr,
   to: dateStr, // inklusive
   employeeId: z.string().optional(),
+  /** Filial-ID oder "none" (ohne Filiale). Leer = alle Filialen. */
+  branch: z.string().max(64).optional().transform((v) => v?.trim() || undefined),
 });
 
 export const closingSchema = z.object({

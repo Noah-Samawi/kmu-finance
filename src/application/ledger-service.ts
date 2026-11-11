@@ -4,46 +4,83 @@
 //   2. Salden lesen + Regeln prüfen (kein Minus)
 //   3. assertPeriodOpen  (abgeschlossener Monat ist gesperrt)
 //   4. insertEntry
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import type { Tx } from "@/infrastructure/db/client";
 import { auditLogs, ledgerEntries, users, type LedgerType } from "@/infrastructure/db/schema";
+import { UNASSIGNED_BRANCH } from "@/domain/branch";
 import { notFound, rule } from "@/domain/errors";
 import { formatCents } from "@/domain/money";
 import type { Ctx } from "./context";
+
+/** undefined = alle Filialen, "none" = ohne Filiale, sonst branchId */
+export type BranchScope = string | undefined;
+
+export function branchPred(branchId?: BranchScope) {
+  if (!branchId) return undefined;
+  if (branchId === UNASSIGNED_BRANCH) return isNull(ledgerEntries.branchId);
+  return eq(ledgerEntries.branchId, branchId);
+}
 
 async function sumCol(
   tx: Tx, tenantId: string,
   col: typeof ledgerEntries.poolDeltaCents | typeof ledgerEntries.cashDeltaCents | typeof ledgerEntries.bankDeltaCents
     | typeof ledgerEntries.claimDeltaCents | typeof ledgerEntries.partnerDeltaCents,
   before?: Date,
+  branchId?: BranchScope,
 ) {
   const [r] = await tx
     .select({ v: sql<string>`coalesce(sum(${col}), 0)::bigint` })
     .from(ledgerEntries)
-    .where(and(eq(ledgerEntries.tenantId, tenantId), before ? lt(ledgerEntries.bookingDate, before) : undefined));
+    .where(and(
+      eq(ledgerEntries.tenantId, tenantId),
+      before ? lt(ledgerEntries.bookingDate, before) : undefined,
+      branchPred(branchId),
+    ));
   return Number(r.v);
 }
 
-export async function poolBalance(tx: Tx, tenantId: string, before?: Date): Promise<number> {
-  return sumCol(tx, tenantId, ledgerEntries.poolDeltaCents, before);
+export async function poolBalance(tx: Tx, tenantId: string, before?: Date, branchId?: BranchScope): Promise<number> {
+  return sumCol(tx, tenantId, ledgerEntries.poolDeltaCents, before, branchId);
 }
 
-export async function cashBalance(tx: Tx, tenantId: string, before?: Date): Promise<number> {
-  return sumCol(tx, tenantId, ledgerEntries.cashDeltaCents, before);
+export async function cashBalance(tx: Tx, tenantId: string, before?: Date, branchId?: BranchScope): Promise<number> {
+  return sumCol(tx, tenantId, ledgerEntries.cashDeltaCents, before, branchId);
 }
 
-export async function bankBalance(tx: Tx, tenantId: string, before?: Date): Promise<number> {
-  return sumCol(tx, tenantId, ledgerEntries.bankDeltaCents, before);
+export async function bankBalance(tx: Tx, tenantId: string, before?: Date, branchId?: BranchScope): Promise<number> {
+  return sumCol(tx, tenantId, ledgerEntries.bankDeltaCents, before, branchId);
 }
 
+/** Auszahlungsprüfung: immer das reale Firmenkonto (ohne Filialfilter). */
 export async function accountBalance(tx: Tx, tenantId: string, kind: "CASH" | "BANK", before?: Date): Promise<number> {
   return kind === "CASH" ? cashBalance(tx, tenantId, before) : bankBalance(tx, tenantId, before);
+}
+
+/** Anfangsbestände je Filiale vor einem Stichtag – Grundlage für filialautonome Berichte. */
+export async function accountOpeningsByBranch(
+  tx: Tx, tenantId: string, before: Date,
+): Promise<Map<string, { cash: number; bank: number; pool: number }>> {
+  const rows = await tx
+    .select({
+      branchId: ledgerEntries.branchId,
+      cash: sql<string>`coalesce(sum(${ledgerEntries.cashDeltaCents}), 0)::bigint`,
+      bank: sql<string>`coalesce(sum(${ledgerEntries.bankDeltaCents}), 0)::bigint`,
+      pool: sql<string>`coalesce(sum(${ledgerEntries.poolDeltaCents}), 0)::bigint`,
+    })
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.tenantId, tenantId), lt(ledgerEntries.bookingDate, before)))
+    .groupBy(ledgerEntries.branchId);
+  return new Map(rows.map((r) => [
+    r.branchId ?? UNASSIGNED_BRANCH,
+    { cash: Number(r.cash), bank: Number(r.bank), pool: Number(r.pool) },
+  ]));
 }
 
 async function sumEmployeeCol(
   tx: Tx, tenantId: string, employeeId: string,
   col: typeof ledgerEntries.walletDeltaCents | typeof ledgerEntries.claimDeltaCents | typeof ledgerEntries.partnerDeltaCents,
   before?: Date,
+  branchId?: BranchScope,
 ) {
   const [r] = await tx
     .select({ v: sql<string>`coalesce(sum(${col}), 0)::bigint` })
@@ -52,20 +89,21 @@ async function sumEmployeeCol(
       eq(ledgerEntries.tenantId, tenantId),
       eq(ledgerEntries.employeeId, employeeId),
       before ? lt(ledgerEntries.bookingDate, before) : undefined,
+      branchPred(branchId),
     ));
   return Number(r.v);
 }
 
-export async function walletBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date): Promise<number> {
-  return sumEmployeeCol(tx, tenantId, employeeId, ledgerEntries.walletDeltaCents, before);
+export async function walletBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date, branchId?: BranchScope): Promise<number> {
+  return sumEmployeeCol(tx, tenantId, employeeId, ledgerEntries.walletDeltaCents, before, branchId);
 }
 
-export async function claimBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date): Promise<number> {
-  return sumEmployeeCol(tx, tenantId, employeeId, ledgerEntries.claimDeltaCents, before);
+export async function claimBalance(tx: Tx, tenantId: string, employeeId: string, before?: Date, branchId?: BranchScope): Promise<number> {
+  return sumEmployeeCol(tx, tenantId, employeeId, ledgerEntries.claimDeltaCents, before, branchId);
 }
 
-export async function partnerBalance(tx: Tx, tenantId: string, partnerId: string, before?: Date): Promise<number> {
-  return sumEmployeeCol(tx, tenantId, partnerId, ledgerEntries.partnerDeltaCents, before);
+export async function partnerBalance(tx: Tx, tenantId: string, partnerId: string, before?: Date, branchId?: BranchScope): Promise<number> {
+  return sumEmployeeCol(tx, tenantId, partnerId, ledgerEntries.partnerDeltaCents, before, branchId);
 }
 
 /** Salden aller Mitarbeiter eines Mandanten in einer Abfrage */

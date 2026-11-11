@@ -27,9 +27,12 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
   const from = sp.from && DAY.test(sp.from) ? sp.from : undefined;
   const to = sp.to && DAY.test(sp.to) ? sp.to : undefined;
   const filtered = isFiltered(filter) || !!from || !!to;
+  const branchId = filter.branchId;
   const [pool, employees, persons, month, day, branches] = await Promise.all([
     poolOverview(user), listEmployees(user), listPersons(user),
-    getSummary(user, `${monthKey()}-01`, today), getSummary(user, today, today), listBranches(user),
+    getSummary(user, `${monthKey()}-01`, today, undefined, branchId),
+    getSummary(user, today, today, undefined, branchId),
+    listBranches(user),
   ]);
   const moneyRows = filtered
     ? (await listLedger(user, { from, to, filter, limit: 500 })).filter((r) => r.cashDeltaCents !== 0 || r.bankDeltaCents !== 0)
@@ -37,8 +40,8 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
   const cats = month.summary.totals.expensesByCategory;
   const active = employees.filter((e) => e.isActive);
   const accounts = [
-    { key: "CASH" as const, title: "Kasse (Bar)", now: pool.cashBalanceCents, month: month.summary.cash, today: day.summary.cash },
-    { key: "BANK" as const, title: "Bankkonto", now: pool.bankBalanceCents, month: month.summary.bank, today: day.summary.bank },
+    { key: "CASH" as const, title: "Kasse (Bar)", now: branchId ? month.summary.cash.closingCents : pool.cashBalanceCents, month: month.summary.cash, today: day.summary.cash },
+    { key: "BANK" as const, title: "Bankkonto", now: branchId ? month.summary.bank.closingCents : pool.bankBalanceCents, month: month.summary.bank, today: day.summary.bank },
   ];
 
   return (

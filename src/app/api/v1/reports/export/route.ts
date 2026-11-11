@@ -3,11 +3,14 @@ import { fileResponse, query, route } from "@/lib/api";
 import { rangeSchema } from "@/lib/validation/schemas";
 import { exportReport } from "@/application/reports/export";
 
-const schema = rangeSchema.extend({ format: z.enum(["csv", "pdf"]).default("csv") });
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
-/** ?format=csv|pdf&from=...&to=... – Export für den Steuerberater */
+const schema = rangeSchema.extend({ format: z.enum(["csv", "pdf", "zip"]).default("csv") });
+
+/** ?format=csv|pdf|zip&from=...&to=...[&branch=] – ein PDF, CSV oder ZIP je Filiale */
 export const GET = route(["ADMIN", "EMPLOYEE", "PARTNER"], async ({ req, ctx }) => {
   const q = schema.parse(query(req));
-  const f = await exportReport(ctx, q.format, q.from, q.to, q.employeeId);
+  const f = await exportReport(ctx, q.format, q.from, q.to, q.employeeId, q.branch);
   return fileResponse(f.data, f.mime, f.filename);
 });

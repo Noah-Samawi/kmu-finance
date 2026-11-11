@@ -27,7 +27,7 @@ export async function login(email: string, password: string) {
   }
   if (!r.user.isActive) throw new AppError(403, "USER_LOCKED", "Dein Zugang ist gesperrt. Bitte wende dich an die Geschäftsführung.");
   if (r.user.role !== "SUPER_ADMIN" && r.tenantStatus !== "ACTIVE") {
-    throw new AppError(403, "TENANT_SUSPENDED", "Der Firmen-Account ist gesperrt.");
+    throw new AppError(403, "TENANT_SUSPENDED", "Dieses Firmenkonto ist gesperrt. Bitte wenden Sie sich an die Systemverwaltung.");
   }
   resetLogin(key);
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, r.user.id));

@@ -4,13 +4,14 @@ import { requireUser } from "@/lib/auth";
 import { branchOverview, branchReport, listBranches } from "@/application/branches/branches";
 import { listPersons } from "@/application/cash/cash";
 import type { BranchFigures } from "@/domain/branch";
+import { branchPdfUrl } from "@/domain/branch";
 import { parseLedgerFilter } from "@/domain/ledger-filter";
 import { formatCents } from "@/domain/money";
 import { monthKey, todayKey } from "@/domain/period";
 import { Empty, PageHeader, Section, cx } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { LedgerFilterBar } from "@/components/ledger-filter-bar";
-import { BranchAdmin } from "./branch-forms";
+import { BranchAdmin, BranchBookingsPanel, BranchDetailActions } from "./branch-forms";
 
 export const metadata: Metadata = { title: "Filialen" };
 
@@ -27,11 +28,12 @@ export default async function BranchesPage({ searchParams }: { searchParams: Pro
   const [branches, overview, persons] = await Promise.all([listBranches(user), branchOverview(user, from, to), listPersons(user)]);
   const detail = selected ? await branchReport(user, selected, from, to, filter) : null;
   const qs = (b: string) => `?${new URLSearchParams({ branch: b, from, to })}`;
+  const selectedBranch = selected && selected !== "none" ? branches.find((b) => b.id === selected) ?? null : null;
 
   return (
     <>
       <PageHeader title="Filialen & Standorte"
-        subtitle="Kasse und Bank laufen zentral – jede Einnahme, Ausgabe und jeder Beleg kann einer Filiale zugeordnet werden. Hier: Umsätze (Bar & Bank) und Kosten je Standort." />
+        subtitle="Jede Buchung gehört zu einer Filiale oder zur zentralen Verwaltung. Berichte & Abschlüsse rechnen Kasse, Bank und GuV strikt je Standort – hier die Umsätze und Kosten im Überblick." />
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
           <Section title={`Übersicht ${fmt(from)} – ${fmt(to)}`} flush>
@@ -57,9 +59,11 @@ export default async function BranchesPage({ searchParams }: { searchParams: Pro
                   </thead>
                   <tbody className="divide-y divide-line">
                     {overview.branches.map((b) => (
-                      <OverviewRow key={b.id} href={qs(b.id)} name={b.name} f={b.figures} active={selected === b.id} inactive={!b.isActive} />
+                      <OverviewRow key={b.id} href={qs(b.id)} name={b.name} f={b.figures} active={selected === b.id}
+                        inactive={!b.isActive} pdfHref={branchPdfUrl(b.id, from, to, "filialbericht")} />
                     ))}
-                    <OverviewRow href={qs("none")} name="Ohne Filiale (zentral)" f={overview.unassigned} active={selected === "none"} muted />
+                    <OverviewRow href={qs("none")} name="Ohne Filiale (zentral)" f={overview.unassigned} active={selected === "none"}
+                      muted pdfHref={branchPdfUrl("none", from, to, "filialbericht")} />
                     <OverviewRow name="Gesamt" f={overview.total} strong />
                   </tbody>
                 </table>
@@ -68,7 +72,10 @@ export default async function BranchesPage({ searchParams }: { searchParams: Pro
           </Section>
 
           {detail && (
-            <Section title={`${detail.branch?.name ?? "Ohne Filiale (zentral)"} – ${fmt(from)} bis ${fmt(to)}`} flush>
+            <Section
+              title={`${detail.branch?.name ?? "Ohne Filiale (zentral)"} – ${fmt(from)} bis ${fmt(to)}`}
+              actions={<BranchDetailActions branch={selectedBranch} from={from} to={to} />}
+              flush>
               <div className="grid gap-4 px-4 py-4 md:grid-cols-2 md:px-5">
                 <dl className="space-y-1.5 rounded-lg bg-paper px-3 py-2 tabular">
                   <Line label="Umsatz Kasse (Bar)" cents={detail.figures.revenueCashCents} />
@@ -88,10 +95,12 @@ export default async function BranchesPage({ searchParams }: { searchParams: Pro
                   ) : <p className="text-sm text-muted">Keine Kosten im Zeitraum.</p>}
                 </div>
               </div>
-              <LedgerFilterBar action="/admin/branches" filter={filter} from={from} to={to} persons={persons} hideBranch
-                hidden={{ branch: selected ?? undefined }} count={detail.entries.length} />
-              <LedgerList rows={detail.entries.slice(0, 500)} mode="both" showEmployee admin branches={branches}
-                emptyTitle="Keine Buchungen für diese Filiale im Zeitraum" />
+              <BranchBookingsPanel title="Buchungen dieser Filiale im Zeitraum" count={detail.entries.length}>
+                <LedgerFilterBar action="/admin/branches" filter={filter} from={from} to={to} persons={persons} hideBranch
+                  hidden={{ branch: selected ?? undefined }} count={detail.entries.length} />
+                <LedgerList rows={detail.entries.slice(0, 500)} mode="both" showEmployee admin branches={branches}
+                  emptyTitle="Keine Buchungen für diese Filiale im Zeitraum" />
+              </BranchBookingsPanel>
             </Section>
           )}
         </div>
@@ -103,14 +112,20 @@ export default async function BranchesPage({ searchParams }: { searchParams: Pro
 
 const fmt = (d: string) => d.split("-").reverse().join(".");
 
-function OverviewRow({ href, name, f, active, inactive, muted, strong }: {
+function OverviewRow({ href, name, f, active, inactive, muted, strong, pdfHref }: {
   href?: string; name: string; f: BranchFigures; active?: boolean; inactive?: boolean; muted?: boolean; strong?: boolean;
+  pdfHref?: string;
 }) {
   return (
     <tr className={cx(active && "bg-ledger-soft", strong && "border-t-2 border-ink font-semibold")}>
       <td className="px-4 py-2 md:px-5">
-        {href ? <Link href={href} className={cx("font-medium text-ledger hover:underline", muted && "text-muted")}>{name}</Link> : name}
-        {inactive && <span className="ms-1 text-xs text-muted">(inaktiv)</span>}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {href ? <Link href={href} className={cx("font-medium text-ledger hover:underline", muted && "text-muted")}>{name}</Link> : name}
+          {inactive && <span className="text-xs text-muted">(inaktiv)</span>}
+          {pdfHref && (
+            <a href={pdfHref} className="inline-flex min-h-9 items-center text-sm font-medium text-ledger hover:underline">PDF</a>
+          )}
+        </div>
       </td>
       <td className="px-2 py-2 text-right">{formatCents(f.revenueCashCents)}</td>
       <td className="px-2 py-2 text-right">{formatCents(f.revenueBankCents)}</td>

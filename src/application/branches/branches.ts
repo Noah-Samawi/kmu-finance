@@ -1,9 +1,10 @@
-// Filialen / Standorte: Konten laufen zentral (Kasse & Bank), jede Buchung kann einer Filiale zugeordnet werden.
+// Filialen / Standorte: jede Buchung trägt branchId (null = zentral).
+// Berichte rechnen Kasse/Bank je Filiale; die Auszahlungsprüfung (kein Minus) bleibt unternehmensweit.
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@/infrastructure/db/client";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
-import { branches } from "@/infrastructure/db/schema";
+import { bankStatements, branches, incomingBills, ledgerEntries, receipts } from "@/infrastructure/db/schema";
 import { conflict, notFound } from "@/domain/errors";
 import { branchFigures } from "@/domain/branch";
 import { filterLedgerRows, type LedgerFilter } from "@/domain/ledger-filter";
@@ -56,6 +57,38 @@ export async function updateBranch(ctx: Ctx, id: string, input: z.infer<typeof b
     }).where(eq(branches.id, id)).returning();
     await audit(tx, ctx, "branch.updated", "Branch", id, { before: { name: b.name, city: b.city, isActive: b.isActive }, after: input });
     return { branch: u };
+  });
+}
+
+/** Buchungen vorhanden → inaktiv archivieren. Leer → vollständig löschen. */
+export async function deleteBranch(ctx: Ctx, id: string) {
+  requireRole(ctx, "ADMIN");
+  const tenantId = tid(ctx);
+  return withTenant(ctx, async (tx) => {
+    const b = await tx.query.branches.findFirst({ where: and(eq(branches.id, id), eq(branches.tenantId, tenantId)) });
+    if (!b) throw notFound("Filiale");
+    const n = (v: { n: number }[]) => Number(v[0]?.n ?? 0);
+    const [ledger, receiptN, bills, statements] = await Promise.all([
+      tx.select({ n: sql<number>`count(*)::int` }).from(ledgerEntries)
+        .where(and(eq(ledgerEntries.tenantId, tenantId), eq(ledgerEntries.branchId, id))).then(n),
+      tx.select({ n: sql<number>`count(*)::int` }).from(receipts)
+        .where(and(eq(receipts.tenantId, tenantId), eq(receipts.branchId, id))).then(n),
+      tx.select({ n: sql<number>`count(*)::int` }).from(incomingBills)
+        .where(and(eq(incomingBills.tenantId, tenantId), eq(incomingBills.branchId, id))).then(n),
+      tx.select({ n: sql<number>`count(*)::int` }).from(bankStatements)
+        .where(and(eq(bankStatements.tenantId, tenantId), eq(bankStatements.branchId, id))).then(n),
+    ]);
+    const refs = ledger + receiptN + bills + statements;
+    if (refs > 0) {
+      if (b.isActive) {
+        await tx.update(branches).set({ isActive: false }).where(eq(branches.id, id));
+        await audit(tx, ctx, "branch.archived", "Branch", id, { name: b.name, ledger, receipts: receiptN, bills, statements });
+      }
+      return { deleted: false, archived: true, bookingCount: ledger, name: b.name };
+    }
+    await tx.delete(branches).where(and(eq(branches.id, id), eq(branches.tenantId, tenantId)));
+    await audit(tx, ctx, "branch.deleted", "Branch", id, { name: b.name });
+    return { deleted: true, archived: false, bookingCount: 0, name: b.name };
   });
 }
 

@@ -31,16 +31,16 @@ export function EntryActions({ id, amountCents, description, branchId, branches,
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className="flex gap-3 text-xs font-medium">
+      <div className="flex flex-wrap justify-end gap-x-3 gap-y-1 text-sm font-medium">
         {canEdit && (
           <button type="button" disabled={busy} title={editHint} onClick={() => { setEditing((v) => !v); setError(null); }}
-            className="text-ledger underline-offset-2 hover:underline">Ändern</button>
+            className="min-h-9 text-ledger underline-offset-2 hover:underline">Ändern</button>
         )}
-        <button type="button" disabled={busy} className="text-muted underline-offset-2 hover:text-minus hover:underline"
+        <button type="button" disabled={busy} className="min-h-9 text-muted underline-offset-2 hover:text-minus hover:underline"
           onClick={() => { const r = ask("Stornieren (Gegenbuchung, bleibt sichtbar) – Grund?"); if (r) call("POST", `/api/v1/ledger/${id}/reverse`, { reason: r }); }}>
           Stornieren
         </button>
-        <button type="button" disabled={busy} className="text-minus underline-offset-2 hover:underline"
+        <button type="button" disabled={busy} className="min-h-9 text-minus underline-offset-2 hover:underline"
           onClick={() => {
             if (!confirm(`Buchung über ${formatCents(amountCents)} komplett entfernen? Der Kontostand wird neu berechnet.`)) return;
             const r = ask("Löschen – Grund?");

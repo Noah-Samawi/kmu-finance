@@ -2,9 +2,13 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Tx } from "@/infrastructure/db/client";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
-import { tenants, users } from "@/infrastructure/db/schema";
+import { branches, tenants, users } from "@/infrastructure/db/schema";
 import { PdfWriter, A4, MARGIN } from "@/infrastructure/pdf/pdf-kit";
+import { zipStore } from "@/infrastructure/zip";
 import { ACCOUNT_LABEL } from "@/domain/accounts";
+import {
+  UNASSIGNED_BRANCH, UNASSIGNED_BRANCH_NAME, branchHeadline, branchReportTitle, reportFileStem, reportScopeTitle,
+} from "@/domain/branch";
 import { accountFlowLines, categoryLabel, entryLabel } from "@/domain/cash";
 import { LEDGER_LABEL } from "@/domain/ledger";
 import { centsToPlain, formatCents } from "@/domain/money";
@@ -33,9 +37,11 @@ export function toCsv(rows: LedgerRow[], partnerBookings: PartnerBookingRow[] = 
     const safe = /^[=+\-@\t]/.test(s) && !/^-?\d/.test(s) ? `'${s}` : s;
     return /[;"]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
-  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Konto", "Kasse (EUR)", "Bank (EUR)", "Budget (EUR)", "Auslage-Anspruch (EUR)", "Kapital Partner (EUR)", "Kategorie", "Gemeinsame Erfassung (ID)"];
+  const header = ["Buchungsdatum", "Buchungs-ID", "Art", "Mitarbeiter", "Filiale", "Beschreibung", "Händler (Beleg)", "Rechnungsnr.", "Konto", "Kasse (EUR)", "Bank (EUR)", "Budget (EUR)", "Auslage-Anspruch (EUR)", "Kapital Partner (EUR)", "Kategorie", "Gemeinsame Erfassung (ID)"];
   const lines = [...rows].reverse().map((r) => [
-    fmtDateTime(r.bookingDate), r.id, typeLabel(r), r.employeeName ?? "", r.description ?? "",
+    fmtDateTime(r.bookingDate), r.id, typeLabel(r), r.employeeName ?? "",
+    r.branchName ?? (r.branchId ? "" : UNASSIGNED_BRANCH_NAME),
+    r.description ?? "",
     r.receiptMerchant ?? "", r.invoiceNumber ?? "", r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Kasse" : "",
     centsToPlain(r.cashDeltaCents), centsToPlain(r.bankDeltaCents),
     centsToPlain(r.walletDeltaCents), centsToPlain(r.claimDeltaCents), centsToPlain(r.partnerDeltaCents),
@@ -51,17 +57,36 @@ export function toCsv(rows: LedgerRow[], partnerBookings: PartnerBookingRow[] = 
   return "﻿" + [header.join(";"), ...lines, ...partnerBlock].join("\r\n") + "\r\n";
 }
 
+export interface ReportPdfOpts {
+  /** Große erste Zeile, z. B. "Filiale: Wiesbaden" */
+  branchHeadline?: string | null;
+  /** Filiale-Spalte im Journal (nur Gesamtsicht) */
+  showBranchInJournal?: boolean;
+}
+
 /**
- * Firmenbericht: Kasse/Bank, Pool, Ausgaben, Journal – danach je Person ein eigener
- * Einzelbericht auf eigener Seite (keine Sammeltabellen über mehrere Personen).
+ * Firmenbericht: Kasse/Bank, Ausgaben, Journal.
+ * Filial-PDF: nur diese Filiale, ohne Personen-Einzelberichte.
+ * Gesamt-PDF für den Steuerberater: danach je Person ein eigener Bericht.
  */
 export async function renderReportPdf(
   tenantName: string, s: Summary, rows: LedgerRow[], title: string, employeeView: boolean, persons: FullPersonReport[] = [],
+  opts: ReportPdfOpts = {},
 ) {
   const w = await PdfWriter.create();
   const width = A4.w - 2 * MARGIN;
-  w.line(title, { size: 16, bold: true });
+  if (opts.branchHeadline) {
+    w.line(opts.branchHeadline, { size: 20, bold: true });
+    w.line(title, { size: 13, bold: true });
+  } else {
+    w.line(title, { size: 16, bold: true });
+  }
   w.line(`${tenantName}   ·   Zeitraum ${fmtDate(new Date(s.from + "T12:00:00Z"))} – ${fmtDate(new Date(s.to + "T12:00:00Z"))}`, { size: 9 });
+  if (opts.branchHeadline) {
+    w.line("Nur Einnahmen, Ausgaben, Bestände und Buchungen dieser Filiale.", { size: 8 });
+  } else if (!employeeView && !s.scope?.branchId) {
+    w.line("Konsolidierte Gesamtsicht aller Filialen. Die Aufschlüsselung je Standort folgt nach Kasse und Bank.", { size: 8 });
+  }
   w.hr();
 
   if (employeeView) {
@@ -76,7 +101,7 @@ export async function renderReportPdf(
         accountFlowLines(account, flow).map((l) => [l.label, formatCents(l.cents)]));
       w.y -= 8;
     }
-    w.line("Ausgaben", { size: 11, bold: true });
+    w.line("Ausgaben im Zeitraum", { size: 11, bold: true });
     w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
       ["Ausgaben Kasse (Bar)", formatCents(s.cash.expenseCents)],
       ["Ausgaben Bankkonto", formatCents(s.bank.expenseCents)],
@@ -86,60 +111,165 @@ export async function renderReportPdf(
       ["Betriebsausgaben gesamt", formatCents(s.totals.expensesCents)],
     ]);
     w.y -= 8;
-    w.paragraph(
-      `Personenkonten (Budget, Auslagen, Kapital) stehen in den Einzelberichten ab Seite 2 – je Person ein eigener Bericht${persons.length ? `: ${persons.map((p) => p.person.name).join(", ")}` : ""}.`,
-      width, { size: 8.5 },
-    );
-    w.y -= 4;
+    if (s.pnl) {
+      w.line("Gewinn & Verlust", { size: 11, bold: true });
+      w.table([{ title: "Position", width: 330 }, { title: "Betrag", width: width - 330, align: "right" }], [
+        ["Einnahmen (Tageseinnahmen + Rechnungen)", formatCents(s.pnl.revenueCents)],
+        ["Ausgaben (Betriebsausgaben)", formatCents(s.pnl.costsCents)],
+        ["Gewinn / Verlust", formatCents(s.pnl.resultCents)],
+      ]);
+      w.y -= 8;
+    }
+    const cmp = opts.branchHeadline ? [] : (s.byBranch ?? []);
+    if (cmp.length) {
+      w.line("Aufschlüsselung nach Filiale", { size: 11, bold: true });
+      w.table(
+        [
+          { title: "Filiale", width: 95 },
+          { title: "Einnahmen", width: 80, align: "right" as const },
+          { title: "Ausgaben", width: 80, align: "right" as const },
+          { title: "Endbestand Kasse", width: 80, align: "right" as const },
+          { title: "Endbestand Bank", width: 80, align: "right" as const },
+          { title: "Gewinn/Verlust", width: width - 415, align: "right" as const },
+        ],
+        cmp.map((r) => [
+          r.name,
+          formatCents(r.incomeCents),
+          formatCents(r.expenseCents),
+          formatCents(r.cashClosingCents),
+          formatCents(r.bankClosingCents),
+          formatCents(r.resultCents),
+        ]),
+        8,
+      );
+      w.y -= 8;
+    }
+    if (persons.length) {
+      w.paragraph(
+        `Personenkonten (Budget, Auslagen, Kapital) stehen in den Einzelberichten ab Seite 2 – je Person ein eigener Bericht: ${persons.map((p) => p.person.name).join(", ")}.`,
+        width, { size: 8.5 },
+      );
+      w.y -= 4;
+    }
   }
 
   const journal = rows.filter((r) => r.cashDeltaCents || r.bankDeltaCents);
+  const withBranch = !!opts.showBranchInJournal;
   w.y -= 8;
   w.line(`Journal Kasse / Bank (${journal.length} Bewegungen)`, { size: 11, bold: true });
-  w.line("Nur Geldbewegungen der Firmenkonten – Budget-, Beleg- und Auslagenbuchungen je Person stehen im Einzelbericht.", { size: 8 });
+  w.line(opts.branchHeadline
+    ? "Nur Geldbewegungen dieser Filiale."
+    : "Nur Geldbewegungen der Firmenkonten – Budget-, Beleg- und Auslagenbuchungen je Person stehen im Einzelbericht.", { size: 8 });
   w.table(
-    [
-      { title: "Datum", width: 62 }, { title: "Art", width: 88 }, { title: "Person", width: 70 },
-      { title: "Konto", width: 40 }, { title: "Beschreibung", width: 120 },
-      { title: "Kasse", width: 52, align: "right" as const },
-      { title: "Bank", width: 52, align: "right" as const },
-    ],
-    [...journal].reverse().map((r) => [
-      fmtDateTime(r.bookingDate), typeLabel(r), r.employeeName ?? "–",
-      r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Bar" : "",
-      [r.description, r.invoiceNumber].filter(Boolean).join(" · "),
-      r.cashDeltaCents ? formatCents(r.cashDeltaCents) : "",
-      r.bankDeltaCents ? formatCents(r.bankDeltaCents) : "",
-    ]),
+    withBranch
+      ? [
+        { title: "Datum", width: 56 }, { title: "Art", width: 72 }, { title: "Filiale", width: 62 },
+        { title: "Konto", width: 36 }, { title: "Beschreibung", width: 115 },
+        { title: "Kasse", width: 52, align: "right" as const },
+        { title: "Bank", width: 52, align: "right" as const },
+      ]
+      : [
+        { title: "Datum", width: 62 }, { title: "Art", width: 88 }, { title: "Person", width: 70 },
+        { title: "Konto", width: 40 }, { title: "Beschreibung", width: 120 },
+        { title: "Kasse", width: 52, align: "right" as const },
+        { title: "Bank", width: 52, align: "right" as const },
+      ],
+    [...journal].reverse().map((r) => withBranch
+      ? [
+        fmtDateTime(r.bookingDate), typeLabel(r), r.branchName ?? UNASSIGNED_BRANCH_NAME,
+        r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Bar" : "",
+        [r.description, r.invoiceNumber].filter(Boolean).join(" · "),
+        r.cashDeltaCents ? formatCents(r.cashDeltaCents) : "",
+        r.bankDeltaCents ? formatCents(r.bankDeltaCents) : "",
+      ]
+      : [
+        fmtDateTime(r.bookingDate), typeLabel(r), r.employeeName ?? "–",
+        r.accountKind === "BANK" ? "Bank" : r.accountKind === "CASH" ? "Bar" : "",
+        [r.description, r.invoiceNumber].filter(Boolean).join(" · "),
+        r.cashDeltaCents ? formatCents(r.cashDeltaCents) : "",
+        r.bankDeltaCents ? formatCents(r.bankDeltaCents) : "",
+      ]),
     8,
   );
   persons.forEach((p) => drawPersonReport(w, p, { newPage: true }));
-  w.footerOnAllPages(`${tenantName} · ${title} · erstellt ${fmtDateTime(new Date())}`);
+  w.footerOnAllPages(`${tenantName} · ${opts.branchHeadline ? `${opts.branchHeadline} · ` : ""}${title} · erstellt ${fmtDateTime(new Date())}`);
   return w.save();
 }
 
-export async function exportReport(ctx: Ctx, format: "csv" | "pdf", from: string, to: string, employeeId?: string) {
+export async function exportReport(ctx: Ctx, format: "csv" | "pdf" | "zip", from: string, to: string, employeeId?: string, branchId?: string) {
   requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   if (ctx.role === "PARTNER" && !ctx.canViewReports) throw forbidden("Kein Zugriff auf Berichte");
+  if (format === "zip") return exportAllBranchReports(ctx, from, to);
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
   const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
+  const scoped = !!branchId;
   const { rows, summary, tenantName, partnerBookings, persons } = await withTenant(ctx, async (tx) => ({
-    rows: await ledgerRows(tx, tenantId, { range, employeeId: only, limit: 100_000 }),
-    summary: await buildSummary(tx, tenantId, range, from, to, only),
+    rows: await ledgerRows(tx, tenantId, { range, employeeId: only, branchId, limit: 100_000 }),
+    summary: await buildSummary(tx, tenantId, range, from, to, only, branchId),
     partnerBookings: ctx.role === "EMPLOYEE" || (only && ctx.role === "ADMIN")
       ? []
       : await partnerBookingRows(tx, tenantId, { range, partnerId: only }),
-    persons: await personsFor(tx, tenantId, only, from, to),
+    persons: scoped || ctx.role === "EMPLOYEE"
+      ? []
+      : await personsFor(tx, tenantId, only, from, to),
     tenantName: (await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { name: true } }))!.name,
   }));
-  const base = `protokoll_${from}_${to}`;
+  const unassigned = branchId === UNASSIGNED_BRANCH;
+  const named = !unassigned && branchId ? summary.scope?.branchName : null;
+  const stem = named ? reportFileStem(from, to, { branch: named })
+    : unassigned ? reportFileStem(from, to, "zentral")
+      : reportFileStem(from, to, "gesamt");
   if (format === "csv") {
-    return { filename: `${base}.csv`, mime: "text/csv; charset=utf-8", data: Buffer.from(toCsv(rows, partnerBookings), "utf-8") };
+    return { filename: `${stem}.csv`, mime: "text/csv; charset=utf-8", data: Buffer.from(toCsv(rows, partnerBookings), "utf-8") };
   }
-  const title = ctx.role === "EMPLOYEE" ? `Kontoprotokoll ${ctx.name}` : "Einnahmen- & Ausgabenprotokoll";
-  const data = await renderReportPdf(tenantName, summary, rows, title, ctx.role === "EMPLOYEE", persons);
-  return { filename: `${base}.pdf`, mime: "application/pdf", data: Buffer.from(data) };
+  const title = ctx.role === "EMPLOYEE"
+    ? `Kontoprotokoll ${ctx.name}`
+    : scoped
+      ? branchReportTitle({ branchName: named, unassigned })
+      : reportScopeTitle(from, to, { branchName: named, unassigned });
+  const headline = ctx.role === "EMPLOYEE" ? null : branchHeadline({ branchName: named, unassigned });
+  const data = await renderReportPdf(tenantName, summary, rows, title, ctx.role === "EMPLOYEE", persons, {
+    branchHeadline: headline,
+    showBranchInJournal: !scoped && ctx.role !== "EMPLOYEE",
+  });
+  return { filename: `${stem}.pdf`, mime: "application/pdf", data: Buffer.from(data) };
+}
+
+/** Ein PDF je Filiale + Zentral + Gesamt, als ZIP. */
+export async function exportAllBranchReports(ctx: Ctx, from: string, to: string) {
+  requireRole(ctx, "ADMIN", "PARTNER");
+  if (ctx.role === "PARTNER" && !ctx.canViewReports) throw forbidden("Kein Zugriff auf Berichte");
+  const tenantId = tid(ctx);
+  const range = rangeFromDays(from, to);
+  const files = await withTenant(ctx, async (tx) => {
+    const tenantName = (await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { name: true } }))!.name;
+    const list = await tx.select({ id: branches.id, name: branches.name }).from(branches)
+      .where(eq(branches.tenantId, tenantId)).orderBy(asc(branches.name));
+    const out: { name: string; data: Buffer }[] = [];
+    const add = async (branchId: string | undefined, stem: string, headline: string | null, title: string) => {
+      const summary = await buildSummary(tx, tenantId, range, from, to, undefined, branchId);
+      const rows = await ledgerRows(tx, tenantId, { range, branchId, limit: 100_000 });
+      const pdf = await renderReportPdf(tenantName, summary, rows, title, false, [], {
+        branchHeadline: headline,
+        showBranchInJournal: !branchId,
+      });
+      out.push({ name: `${stem}.pdf`, data: Buffer.from(pdf) });
+    };
+    for (const b of list) {
+      await add(b.id, reportFileStem(from, to, { branch: b.name }), branchHeadline({ branchName: b.name }),
+        branchReportTitle({ branchName: b.name }));
+    }
+    await add(UNASSIGNED_BRANCH, reportFileStem(from, to, "zentral"), branchHeadline({ unassigned: true }),
+      branchReportTitle({ unassigned: true }));
+    await add(undefined, reportFileStem(from, to, "gesamt"), null, reportScopeTitle(from, to, {}));
+    return out;
+  });
+  return {
+    filename: `Monatsberichte_${from}_${to}.zip`,
+    mime: "application/zip",
+    data: zipStore(files),
+  };
 }
 
 async function personsFor(tx: Tx, tenantId: string, only: string | undefined, from: string, to: string) {

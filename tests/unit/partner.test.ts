@@ -166,6 +166,7 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
   it("CSV enthält Person, Herkunft, Betrag, Zweck und Status", async () => {
     const { toCsv } = await import("@/application/reports/export");
     const csv = toCsv([], bookings).replace(/\u00a0/g, " ");
+    expect(csv.split("\r\n")[0]).toContain("Filiale");
     expect(csv).toContain("Samir Haddad;Auslage / Ausgabe für die Firma;Eigene Tasche / Privat;1000,00;Ware beim Großhandel bezahlt;nein;Samir Haddad;teilweise erstattet, offen 600,00 €");
     expect(csv).toContain("Bankkonto der Firma");
   });
@@ -184,6 +185,11 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
       carryForward: { cashCents: 0, bankCents: 500_000, poolCents: 0 },
       totals: { receiptsCents: 0, adjustmentsCents: 0, walletsOpenCents: 0, claimsOpenCents: 0, expensesCents: 4_990, expensesByCategory: [{ category: "WAREN", label: "Wareneinkauf (Lebensmittel)", cents: 4_990 }] },
       employees: [],
+      byBranch: [{
+        key: "ffm", name: "Frankfurt", incomeCents: 0, expenseCents: 4_990,
+        cashOpeningCents: 0, bankOpeningCents: 500_000, cashClosingCents: 0, bankClosingCents: 260_000, resultCents: -4_990,
+      }],
+      pnl: { revenueCents: 0, costsCents: 4_990, resultCents: -4_990 },
       partners: [{
         partnerId: "p1", name: "Samir Haddad", openingCents: 0, depositCents: 0, drawCents: 0, profitCents: 0, closingCents: 0,
         outlayOpeningCents: 0, outlayCents: 100_000, refundCents: 40_000, outlayClosingCents: 60_000,
@@ -194,6 +200,10 @@ describe("Bericht: Gesellschafter-Buchungen im PDF und CSV", () => {
     const pdf = await renderReportPdf("Test GmbH", s, [], "Einnahmen- & Ausgabenprotokoll", false, []);
     const doc = await PDFDocument.load(pdf);
     expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
+    const branchPdf = await renderReportPdf("Test GmbH", s, [], "Filialbericht & Monatsabschluss: Filiale Wiesbaden", false, [], {
+      branchHeadline: "Filiale: Wiesbaden",
+    });
+    expect((await PDFDocument.load(branchPdf)).getPageCount()).toBe(1);
     if (process.env.PDF_PREVIEW_DIR) writeFileSync(path.join(process.env.PDF_PREVIEW_DIR, "partner-report.pdf"), pdf);
   });
 });

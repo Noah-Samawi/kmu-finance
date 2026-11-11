@@ -264,7 +264,7 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   category: text("category"),
   /** verbindet Teilbuchungen einer Bewegung (z. B. Tageseinnahme Kasse + Bank) */
   batchId: text("batchId"),
-  /** Filiale / Standort (optional, Konten laufen zentral) */
+  /** Filiale / Standort (optional; null = zentrale Verwaltungskosten). Bestände je Filiale = SUM der Deltas. */
   branchId: text("branchId").references(() => branches.id),
   createdAt: createdAt(), // KEIN updatedAt: unveränderlich
 }, (t) => [

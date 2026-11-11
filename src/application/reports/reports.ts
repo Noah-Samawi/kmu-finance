@@ -3,13 +3,20 @@ import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lt, sql } from 
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
 import { branches, invoices, ledgerAttachments, ledgerCorrections, ledgerEntries, periodClosings, receipts, users, type LedgerType } from "@/infrastructure/db/schema";
+import {
+  UNASSIGNED_BRANCH, UNASSIGNED_BRANCH_NAME, branchBalanceSnapshot, branchFigures,
+  type BranchBalanceRow,
+} from "@/domain/branch";
 import { accountFlow, categoryLabel, flowType, type AccountFlow } from "@/domain/cash";
 import { filterLedgerRows, type LedgerFilter } from "@/domain/ledger-filter";
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
 import { requireRole, tid, type Ctx } from "../context";
 import { partnerBookingRows } from "../partners/partner-bookings";
-import { audit, bankBalance, cashBalance, claimBalance, partnerBalance, poolBalance, walletBalance } from "../ledger-service";
+import {
+  accountOpeningsByBranch, audit, bankBalance, cashBalance, claimBalance,
+  partnerBalance, poolBalance, walletBalance,
+} from "../ledger-service";
 
 export interface Range { start: Date; end: Date }
 
@@ -132,14 +139,24 @@ export interface Summary {
   employees: EmployeeSummary[];
   partners: PartnerSummary[];
   entryCount: number;
+  /** Gesetzter Filialfilter (null = konsolidiert alle Filialen) */
+  scope?: { branchId: string | null; branchName: string | null };
+  /** GuV der ausgewerteten Menge (Filiale oder konsolidiert) */
+  pnl?: { revenueCents: number; costsCents: number; resultCents: number };
+  /** Vergleichstabelle nur bei Gesamtsicht (Alle Filialen) */
+  byBranch?: BranchBalanceRow[];
 }
 
 /**
  * Kernauswertung für einen Zeitraum.
  * Admin: alles. Mitarbeiter: nur eigene Zeile, keine Pool-Zahlen.
+ * branchId filtert JEDE Zahl inkl. Anfangsbestand (Bestandsfortschreibung nur dieser Filiale).
  */
-export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromKey: string, toKey: string, onlyEmployeeId?: string): Promise<Summary> {
-  const rows = await ledgerRows(tx, tenantId, { range, employeeId: onlyEmployeeId, limit: 100_000 });
+export async function buildSummary(
+  tx: Tx, tenantId: string, range: Range, fromKey: string, toKey: string,
+  onlyEmployeeId?: string, branchId?: string,
+): Promise<Summary> {
+  const rows = await ledgerRows(tx, tenantId, { range, employeeId: onlyEmployeeId, branchId, limit: 100_000 });
   const sumPool = (t: LedgerType) => rows.filter((r) => effType(r) === t).reduce((s, r) => s + r.poolDeltaCents, 0);
   // "+ 0" normalisiert -0 zu 0 (sonst Anzeige "-0,00 €")
   const sumWallet = (t: LedgerType, emp?: string) =>
@@ -158,8 +175,8 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
 
   const employees: EmployeeSummary[] = [];
   for (const e of empList) {
-    const opening = await walletBalance(tx, tenantId, e.id, range.start);
-    const claimOpening = await claimBalance(tx, tenantId, e.id, range.start);
+    const opening = await walletBalance(tx, tenantId, e.id, range.start, branchId);
+    const claimOpening = await claimBalance(tx, tenantId, e.id, range.start, branchId);
     const s: EmployeeSummary = {
       employeeId: e.id, name: e.name, openingCents: opening,
       allocatedCents: sumWallet("ALLOCATION", e.id),
@@ -188,9 +205,9 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
         .where(and(eq(users.tenantId, tenantId), eq(users.role, "PARTNER"))).orderBy(asc(users.name));
   const partners: PartnerSummary[] = [];
   for (const p of partnerList) {
-    const opening = await partnerBalance(tx, tenantId, p.id, range.start);
-    const outlayOpening = await claimBalance(tx, tenantId, p.id, range.start);
-    const budgetOpening = await walletBalance(tx, tenantId, p.id, range.start);
+    const opening = await partnerBalance(tx, tenantId, p.id, range.start, branchId);
+    const outlayOpening = await claimBalance(tx, tenantId, p.id, range.start, branchId);
+    const budgetOpening = await walletBalance(tx, tenantId, p.id, range.start, branchId);
     const mine = rows.filter((r) => r.employeeId === p.id);
     const row: PartnerSummary = {
       partnerId: p.id, name: p.name, openingCents: opening,
@@ -213,9 +230,9 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
       || row.budgetOpeningCents || row.budgetClosingCents || row.expenseCents || row.purchaseCapitalCents) partners.push(row);
   }
 
-  const poolOpening = onlyEmployeeId ? 0 : await poolBalance(tx, tenantId, range.start);
-  const cashOpening = onlyEmployeeId ? 0 : await cashBalance(tx, tenantId, range.start);
-  const bankOpening = onlyEmployeeId ? 0 : await bankBalance(tx, tenantId, range.start);
+  const poolOpening = onlyEmployeeId ? 0 : await poolBalance(tx, tenantId, range.start, branchId);
+  const cashOpening = onlyEmployeeId ? 0 : await cashBalance(tx, tenantId, range.start, branchId);
+  const bankOpening = onlyEmployeeId ? 0 : await bankBalance(tx, tenantId, range.start, branchId);
   const pool = {
     openingCents: poolOpening,
     incomeInvoiceCents: onlyEmployeeId ? 0 : sumPool("INCOME_INVOICE"),
@@ -242,6 +259,21 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
     .sort((a, b) => b.cents - a.cents);
   const inRange = new Set(rows.map((r) => r.id));
   const flowRows = onlyEmployeeId ? [] : rows.map((r) => ({ ...r, type: flowType(r, inRange) }));
+  const pnl = branchFigures(rows);
+
+  let branchName: string | null = null;
+  if (branchId === UNASSIGNED_BRANCH) branchName = UNASSIGNED_BRANCH_NAME;
+  else if (branchId) {
+    const b = await tx.query.branches.findFirst({
+      where: and(eq(branches.id, branchId), eq(branches.tenantId, tenantId)),
+      columns: { name: true },
+    });
+    branchName = b?.name ?? null;
+  }
+
+  const byBranch = onlyEmployeeId || branchId
+    ? []
+    : await branchComparison(tx, tenantId, range.start, rows, inRange);
 
   return {
     from: fromKey, to: toKey, pool,
@@ -259,7 +291,51 @@ export async function buildSummary(tx: Tx, tenantId: string, range: Range, fromK
     employees,
     partners,
     entryCount: rows.length,
+    scope: { branchId: branchId ?? null, branchName },
+    pnl: { revenueCents: pnl.revenueCents, costsCents: pnl.costsCents, resultCents: pnl.resultCents },
+    byBranch,
   };
+}
+
+async function branchComparison(
+  tx: Tx, tenantId: string, before: Date, rows: LedgerRow[], inRange: Set<string>,
+): Promise<BranchBalanceRow[]> {
+  const list = await tx.select({ id: branches.id, name: branches.name }).from(branches)
+    .where(eq(branches.tenantId, tenantId)).orderBy(asc(branches.name));
+  const openings = await accountOpeningsByBranch(tx, tenantId, before);
+  const grouped = new Map<string, LedgerRow[]>();
+  for (const r of rows) {
+    const k = r.branchId ?? UNASSIGNED_BRANCH;
+    const bucket = grouped.get(k);
+    if (bucket) bucket.push(r);
+    else grouped.set(k, [r]);
+  }
+  const zero = { cash: 0, bank: 0 };
+  const snap = (key: string, name: string, slice: LedgerRow[]) => {
+    const o = openings.get(key) ?? zero;
+    return branchBalanceSnapshot(key, name, { cashCents: o.cash, bankCents: o.bank }, slice, inRange);
+  };
+  const out: BranchBalanceRow[] = list.map((b) => snap(b.id, b.name, grouped.get(b.id) ?? []));
+  const seen = new Set(list.map((b) => b.id));
+  const unassigned = snap(UNASSIGNED_BRANCH, UNASSIGNED_BRANCH_NAME, grouped.get(UNASSIGNED_BRANCH) ?? []);
+  if (unassigned.incomeCents || unassigned.expenseCents || unassigned.cashOpeningCents || unassigned.bankOpeningCents
+    || unassigned.cashClosingCents || unassigned.bankClosingCents || grouped.has(UNASSIGNED_BRANCH)) {
+    out.push(unassigned);
+  }
+  for (const key of new Set([...openings.keys(), ...grouped.keys()])) {
+    if (key === UNASSIGNED_BRANCH || seen.has(key)) continue;
+    const name = grouped.get(key)?.[0]?.branchName ?? "Unbekannte Filiale";
+    out.push(snap(key, name, grouped.get(key) ?? []));
+  }
+  if (out.length) {
+    const totalOpen = { cashCents: 0, bankCents: 0 };
+    for (const r of out) {
+      totalOpen.cashCents += r.cashOpeningCents;
+      totalOpen.bankCents += r.bankOpeningCents;
+    }
+    out.push(branchBalanceSnapshot("total", "Gesamt", totalOpen, rows, inRange));
+  }
+  return out;
 }
 
 /** Buchungsjournal mit Filtern. Mitarbeiter sehen nur ihr eigenes Konto. */
@@ -274,14 +350,14 @@ export async function listLedger(
   return f.filter ? filterLedgerRows(rows, f.filter).slice(0, f.limit ?? 1000) : rows;
 }
 
-export async function getSummary(ctx: Ctx, from: string, to: string, employeeId?: string) {
+export async function getSummary(ctx: Ctx, from: string, to: string, employeeId?: string, branchId?: string) {
   requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
   const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
   return withTenant(ctx, async (tx) => ({
-    summary: await buildSummary(tx, tenantId, range, from, to, only),
-    entries: await ledgerRows(tx, tenantId, { range, employeeId: only, limit: 2000 }),
+    summary: await buildSummary(tx, tenantId, range, from, to, only, branchId),
+    entries: await ledgerRows(tx, tenantId, { range, employeeId: only, branchId, limit: 2000 }),
     partnerBookings: ctx.role === "EMPLOYEE" || (only && ctx.role === "ADMIN")
       ? []
       : await partnerBookingRows(tx, tenantId, { range, partnerId: only }),
