@@ -7,7 +7,7 @@ import { dateInputToDate, todayKey } from "@/domain/period";
 import { accountAdjustSchema, allocationSchema, incomeSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import {
-  accountBalance, audit, bankBalance, cashBalance, insertEntry, insufficient, loadEmployee, poolBalance, walletBalance,
+  accountBalance, audit, bankBalance, cashBalance, insertEntry, insufficient, loadEmployee, poolBalance, vatAccount, walletBalance,
 } from "../ledger-service";
 import { ledgerRows } from "../reports/reports";
 
@@ -18,10 +18,12 @@ export async function poolOverview(ctx: Ctx) {
     const rows = await ledgerRows(tx, tenantId, { limit: 300 });
     const cashBalanceCents = await cashBalance(tx, tenantId);
     const bankBalanceCents = await bankBalance(tx, tenantId);
+    const vat = await vatAccount(tx, tenantId);
     return {
       poolBalanceCents: cashBalanceCents + bankBalanceCents,
       cashBalanceCents,
       bankBalanceCents,
+      vat,
       entries: rows.filter((r) => r.poolDeltaCents !== 0 || r.cashDeltaCents !== 0 || r.bankDeltaCents !== 0).slice(0, 120),
     };
   });

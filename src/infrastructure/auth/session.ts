@@ -45,7 +45,8 @@ export async function resolveSession(token: string | undefined | null): Promise<
   const rows = await db
     .select({
       userId: users.id, tenantId: users.tenantId, role: users.role, name: users.name,
-      email: users.email, isActive: users.isActive, canEnterCashExpense: users.canEnterCashExpense,
+      email: users.email, isActive: users.isActive, canLogin: users.canLogin,
+      canEnterCashExpense: users.canEnterCashExpense,
       canEnterOutlay: users.canEnterOutlay, canViewReports: users.canViewReports, canViewBank: users.canViewBank,
       tenantName: tenants.name, tenantStatus: tenants.status,
     })
@@ -55,7 +56,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
     .where(and(eq(sessions.tokenHash, sha256(token)), gt(sessions.expiresAt, new Date())))
     .limit(1);
   const r = rows[0];
-  if (!r || !r.isActive) return null;
+  if (!r || !r.isActive || r.canLogin === false) return null;
   if (r.role !== "SUPER_ADMIN" && r.tenantStatus !== "ACTIVE") return null;
   return {
     userId: r.userId, tenantId: r.tenantId, role: r.role, name: r.name,

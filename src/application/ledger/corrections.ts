@@ -2,15 +2,17 @@
 //  - Stornieren: GoBD-Gegenbuchung (heute), Original bleibt sichtbar als "storniert".
 //  - Löschen:   Gegenbuchung am Buchungstag des Originals; Original + Storno verschwinden aus allen Ansichten,
 //               Kontostände sind sofort korrigiert. Im Hauptbuch und Protokoll bleibt alles erhalten.
-//  - Ändern:    wie Löschen, zusätzlich eine Ersatzbuchung mit neuem Betrag/Zweck/Filiale am selben Tag.
-import { and, eq } from "drizzle-orm";
+//  - Ändern:    wie Löschen, zusätzlich eine Ersatzbuchung (Betrag/Zweck/Filiale/Person/Gesellschafter-Art/MwSt.).
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@/infrastructure/db/client";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
-import { ledgerAttachments, ledgerCorrections, ledgerEntries, partnerBookings } from "@/infrastructure/db/schema";
+import { ledgerAttachments, ledgerCorrections, ledgerEntries, partnerBookings, users } from "@/infrastructure/db/schema";
+import { expenseDeltas } from "@/domain/cash";
 import { notFound, rule } from "@/domain/errors";
-import { DIRECTLY_REVERSIBLE, LEDGER_LABEL, entryAmount, rescaleDeltas, reversalDeltas, type Deltas } from "@/domain/ledger";
+import { DIRECTLY_REVERSIBLE, LEDGER_LABEL, deltasFor, entryAmount, rescaleDeltas, reversalDeltas, type Deltas } from "@/domain/ledger";
 import type { PartnerKind } from "@/domain/partner";
+import { splitVat, vatLedgerSign } from "@/domain/vat-booking";
 import { editEntrySchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import { audit, bankBalance, cashBalance, claimBalance, insertEntry, insufficient, partnerBalance, walletBalance } from "../ledger-service";
@@ -67,6 +69,7 @@ async function insertReversal(tx: Tx, ctx: Ctx, tenantId: string, orig: Entry, r
   return insertEntry(tx, ctx, tenantId, {
     type: "REVERSAL", ...reversalDeltas(deltasOf(orig)), employeeId: orig.employeeId, reversalOfId: orig.id,
     category: orig.category, branchId: orig.branchId, bookingDate, description: `Storno: ${reason}`,
+    vatRate: orig.vatRate, vatCents: -(orig.vatCents ?? 0), vatMode: orig.vatMode, partnerRole: orig.partnerRole,
   });
 }
 
@@ -116,7 +119,15 @@ export async function removeLedgerEntry(ctx: Ctx, entryId: string, reason: strin
   });
 }
 
-/** Ändern: Betrag, Verwendungszweck und/oder Filiale direkt anpassen (Storno + Ersatzbuchung am selben Tag) */
+async function loadAssignablePerson(tx: Tx, tenantId: string, personId: string) {
+  const p = await tx.query.users.findFirst({
+    where: and(eq(users.id, personId), eq(users.tenantId, tenantId), inArray(users.role, ["EMPLOYEE", "PARTNER"])),
+  });
+  if (!p) throw notFound("Person");
+  return p;
+}
+
+/** Ändern: Betrag, Zweck, Filiale, Person, Gesellschafter-Art und/oder MwSt. (Storno + Ersatzbuchung am selben Tag) */
 export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<typeof editEntrySchema>) {
   requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);
@@ -132,21 +143,96 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     const oldD = deltasOf(orig);
     const oldAmount = entryAmount(oldD);
     const newAmount = input.amountCents ?? oldAmount;
-    const newD = newAmount === oldAmount ? oldD : rescaleDeltas(oldD, newAmount);
+
+    let employeeId = orig.employeeId;
+    if (input.personId !== undefined) {
+      employeeId = input.personId ? (await loadAssignablePerson(tx, tenantId, input.personId)).id : null;
+    }
+    const person = employeeId ? await loadAssignablePerson(tx, tenantId, employeeId) : null;
+
+    let partnerRole: "FIRMA" | "PRIVAT" | null = orig.partnerRole ?? null;
+    if (input.partnerRole !== undefined) partnerRole = input.partnerRole;
+    if (input.personId !== undefined && !input.personId) partnerRole = null;
+    if (person?.role === "PARTNER") {
+      if (!partnerRole) throw rule("Gesellschafter gewählt: bitte „Firmenausgabe / Betriebsausgabe“ oder „Privatentnahme / Gewinnanteil“ angeben");
+    } else {
+      partnerRole = null;
+    }
+
+    const account: "CASH" | "BANK" = orig.accountKind === "BANK" ? "BANK" : "CASH";
+    const wasPrivat = orig.type === "PARTNER_DRAW" || orig.partnerRole === "PRIVAT";
+    const nowPrivat = person?.role === "PARTNER" && partnerRole === "PRIVAT";
+    const canRetype = orig.type === "EXPENSE" || orig.type === "PARTNER_DRAW";
+
+    let type = orig.type;
+    let newD: Deltas = newAmount === oldAmount ? { ...oldD } : rescaleDeltas(oldD, newAmount);
+    let category = orig.category;
+
+    if (canRetype && orig.walletDeltaCents === 0) {
+      if (nowPrivat && !wasPrivat) {
+        type = "PARTNER_DRAW";
+        newD = deltasFor("PARTNER_DRAW", newAmount, account);
+        category = null;
+      } else if (!nowPrivat && wasPrivat) {
+        type = "EXPENSE";
+        newD = expenseDeltas(account, newAmount);
+        category = orig.category ?? "SONSTIGES";
+      } else if (newAmount !== oldAmount) {
+        newD = type === "PARTNER_DRAW"
+          ? deltasFor("PARTNER_DRAW", newAmount, account)
+          : rescaleDeltas(oldD, newAmount);
+      }
+    } else if (canRetype && nowPrivat && orig.walletDeltaCents !== 0) {
+      throw rule("Privatentnahme nicht aus Budget – bitte Kasse oder Bank wählen bzw. neu buchen");
+    }
+
     const branchId = input.branchId === undefined ? orig.branchId : await assertBranch(tx, tenantId, input.branchId);
     const purpose = input.description ?? booking?.purpose ?? orig.description ?? "";
     const description = booking
-      ? partnerEntryDescription(booking.kind as PartnerKind, booking.source, orig.category, purpose)
+      ? partnerEntryDescription(booking.kind as PartnerKind, booking.source, category, purpose)
       : input.description ?? orig.description;
-    if (newAmount === oldAmount && description === orig.description && branchId === orig.branchId) {
-      throw rule("Keine Änderung – Betrag, Verwendungszweck und Filiale sind gleich");
+
+    let vatRate = orig.vatRate;
+    let vatCents = orig.vatCents ?? 0;
+    let vatMode = orig.vatMode;
+    if (nowPrivat) {
+      vatRate = null; vatCents = 0; vatMode = null;
+    } else if (input.vatRate !== undefined) {
+      const mode = input.vatMode ?? (orig.vatMode === "NET" ? "NET" : "GROSS");
+      const split = splitVat(newAmount, input.vatRate, "GROSS");
+      vatRate = split.vatRate || null;
+      vatCents = vatRate
+        ? vatLedgerSign(type === "INCOME_MANUAL" || type === "INCOME_INVOICE" ? "INCOME" : "EXPENSE", split.vatCents)
+        : 0;
+      vatMode = vatRate ? mode : null;
     }
-    await assertBalances(tx, tenantId, orig.employeeId, add(newD, reversalDeltas(oldD)));
+
+    const unchanged =
+      newAmount === oldAmount
+      && description === orig.description
+      && branchId === orig.branchId
+      && employeeId === orig.employeeId
+      && partnerRole === (orig.partnerRole ?? null)
+      && type === orig.type
+      && (vatRate ?? null) === (orig.vatRate ?? null)
+      && vatCents === (orig.vatCents ?? 0);
+    if (unchanged) throw rule("Keine Änderung – Werte sind gleich");
+
+    // Netto-Wirkung auf Kasse/Bank; Personenkonten je betroffenem Konto prüfen
+    const net = add(newD, reversalDeltas(oldD));
+    if (orig.employeeId && employeeId && orig.employeeId === employeeId) {
+      await assertBalances(tx, tenantId, employeeId, net);
+    } else {
+      await assertBalances(tx, tenantId, null, net);
+      if (orig.employeeId) await assertBalances(tx, tenantId, orig.employeeId, reversalDeltas(oldD));
+      if (employeeId) await assertBalances(tx, tenantId, employeeId, newD);
+    }
 
     const rev = await insertReversal(tx, ctx, tenantId, orig, `Geändert – ${input.reason}`, orig.bookingDate);
     const repl = await insertEntry(tx, ctx, tenantId, {
-      type: orig.type, ...newD, employeeId: orig.employeeId, category: orig.category, batchId: orig.batchId,
+      type, ...newD, employeeId, category, batchId: orig.batchId,
       branchId, bookingDate: orig.bookingDate, description,
+      vatRate, vatCents, vatMode, partnerRole,
     });
     const att = await tx.query.ledgerAttachments.findFirst({ where: eq(ledgerAttachments.ledgerEntryId, orig.id) });
     if (att) {
@@ -167,9 +253,15 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     }).returning();
     await audit(tx, ctx, "ledger.edited", "LedgerEntry", orig.id, {
       correctionId: c.id, replacementId: repl.id, reason: input.reason,
-      before: { amountCents: oldAmount, description: orig.description, branchId: orig.branchId },
-      after: { amountCents: newAmount, description, branchId },
+      before: {
+        amountCents: oldAmount, description: orig.description, branchId: orig.branchId,
+        personId: orig.employeeId, partnerRole: orig.partnerRole, type: orig.type,
+      },
+      after: { amountCents: newAmount, description, branchId, personId: employeeId, partnerRole, type },
     });
-    return { entry: repl, previousAmountCents: oldAmount, ...(await balancesAfter(tx, tenantId, orig.employeeId)) };
+    return {
+      entry: repl, previousAmountCents: oldAmount,
+      ...(await balancesAfter(tx, tenantId, employeeId ?? orig.employeeId)),
+    };
   });
 }

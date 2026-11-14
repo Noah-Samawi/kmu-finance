@@ -11,8 +11,9 @@ import { DailyIncomeForm, ExpenseForm } from "@/components/cash-forms";
 import { monthKey, todayKey } from "@/domain/period";
 import { getPersonnelFile } from "@/application/hr/hr";
 import { listBranches } from "@/application/branches/branches";
+import { listPersons } from "@/application/cash/cash";
 import { AllocationForm } from "../../pool/pool-forms";
-import { WalletActions } from "../employee-forms";
+import { EmployeeManageActions, WalletActions } from "../employee-forms";
 import { HrPanel } from "../hr-panel";
 
 export const metadata: Metadata = { title: "Mitarbeiterkonto" };
@@ -22,8 +23,9 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const today = todayKey();
   const from = `${monthKey()}-01`;
-  const [emp, pool, report, hr, branches] = await Promise.all([
-    getEmployee(user, id), poolOverview(user), getSummary(user, from, today, id), getPersonnelFile(user, id), listBranches(user),
+  const [emp, pool, report, hr, branches, persons] = await Promise.all([
+    getEmployee(user, id), poolOverview(user), getSummary(user, from, today, id), getPersonnelFile(user, id),
+    listBranches(user), listPersons(user),
   ]);
   const m = report.summary.employees[0];
   const person = { id: emp.id, name: emp.name, role: "EMPLOYEE" as const, isActive: emp.isActive };
@@ -55,12 +57,16 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
               )}
             </div>
             <p className="mt-1 text-xs text-muted">Kennzahlen für den laufenden Monat</p>
-            <div className="mt-5 border-t border-line pt-4">
+            <div className="mt-5 space-y-4 border-t border-line pt-4">
+              <EmployeeManageActions
+                id={emp.id} name={emp.name} isActive={emp.isActive}
+                cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents}
+              />
               <WalletActions id={emp.id} balanceCents={emp.balanceCents} isActive={emp.isActive} canEnterCashExpense={emp.canEnterCashExpense} canEnterOutlay={emp.canEnterOutlay} claimCents={emp.claimCents} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} />
             </div>
           </Section>
           <Section title="Kontobewegungen diesen Monat" flush>
-            <LedgerList rows={report.entries} mode="wallet" admin branches={branches} />
+            <LedgerList rows={report.entries} mode="wallet" admin branches={branches} persons={persons} />
           </Section>
         </div>
         <div className="space-y-6">

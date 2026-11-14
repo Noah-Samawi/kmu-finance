@@ -116,7 +116,9 @@ export function HrPanel({ employeeId, profile, documents, payslips }: {
         <p className="font-semibold">Unterlage hochladen</p>
         <Field label="Art"><select name="kind" className={inputCls}>{KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}</select></Field>
         <Field label="Titel"><input name="title" required className={inputCls} dir="auto" /></Field>
-        <input name="file" type="file" required className="text-sm" />
+        <Field label="Datei (Kamera, Scan oder PDF)">
+          <input name="file" type="file" required accept="image/*,application/pdf" capture="environment" className="text-sm" />
+        </Field>
         <button disabled={busy} className={cx(btn.base, btn.secondary, btn.sm)}>Hochladen</button>
       </form>
       <ul className="divide-y divide-line text-sm">

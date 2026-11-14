@@ -170,7 +170,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <Section title={`Einzelbuchungen (${shown.length})`} flush>
           <LedgerFilterBar action="/admin/reports" filter={filter} from={from} to={to} branches={branches} persons={persons}
             hidden={{ employeeId }} count={shown.length} />
-          <LedgerList rows={shown} mode="both" showEmployee admin branches={branches} />
+          <LedgerList rows={shown} mode="both" showEmployee admin branches={branches} persons={persons} />
         </Section>
         <div className="space-y-6">
           <Section title="Abschließen">

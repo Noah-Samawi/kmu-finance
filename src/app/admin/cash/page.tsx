@@ -48,7 +48,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
     <>
       <PageHeader title="Kasse & Bank" subtitle="Kasse (Bar) und Bankkonto als getrennte Konten – Tageseinnahmen, Ausgaben und Korrekturen je Konto, lückenlos protokolliert." />
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
+      <div className="mb-6 grid gap-6 lg:grid-cols-3">
         {accounts.map((a) => (
           <section key={a.key} className="rounded-xl border border-line bg-surface p-5 md:p-6" aria-label={a.title}>
             <div className="mb-4 flex items-baseline justify-between gap-4">
@@ -69,6 +69,24 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
             <AccountFlowList account={a.key} flow={a.month} />
           </section>
         ))}
+        <section className="rounded-xl border border-line bg-surface p-5 md:p-6" aria-label="MwSt.-Konto">
+          <div className="mb-4 flex items-baseline justify-between gap-4">
+            <h2 className="text-lg font-semibold">MwSt.-Konto</h2>
+            <p className="text-right">
+              <span className="block text-xs text-muted">Saldo</span>
+              <span className="text-3xl font-semibold tracking-tight tabular">{formatCents(pool.vat.balanceCents)}</span>
+            </p>
+          </div>
+          <p className="mb-3 text-sm text-muted">Getrennt vom Firmenkapital – Kasse/Bank buchen nur den Brutto-Zahlungsbetrag.</p>
+          <dl className="space-y-1 rounded-lg bg-paper px-3 py-2 tabular">
+            <Row label="MwSt. Einnahmen (Umsatzsteuer)" cents={pool.vat.incomeCents} sign="+" />
+            <Row label="MwSt. Ausgaben (Vorsteuer)" cents={pool.vat.expenseCents} sign="−" />
+            <div className="flex items-baseline justify-between gap-4 border-t border-line pt-2 text-[15px] font-semibold">
+              <dt>Saldo MwSt.</dt>
+              <dd className={pool.vat.balanceCents < 0 ? "text-minus" : undefined}>{formatCents(pool.vat.balanceCents)}</dd>
+            </div>
+          </dl>
+        </section>
       </div>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-[1fr_1fr]">
@@ -113,7 +131,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
       <Section title="Bewegungen Kasse (Bar) und Bankkonto – je Buchung mit Konto" flush>
         <LedgerFilterBar action="/admin/cash" filter={filter} from={from} to={to} branches={branches} persons={persons}
           count={filtered ? moneyRows.length : undefined} />
-        <LedgerList rows={moneyRows} mode="pool" showEmployee admin branches={branches}
+        <LedgerList rows={moneyRows} mode="pool" showEmployee admin branches={branches} persons={persons}
           emptyTitle={filtered ? "Keine Buchungen für diesen Filter" : undefined} />
       </Section>
     </>

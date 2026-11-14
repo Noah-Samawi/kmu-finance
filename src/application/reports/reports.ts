@@ -40,6 +40,7 @@ export interface LedgerRow {
   reversalOfId: string | null; reversedType: LedgerType | null; closingId: string | null;
   category: string | null; batchId: string | null; attachmentId: string | null;
   branchId: string | null; branchName: string | null;
+  vatRate: number | null; vatCents: number; partnerRole: "FIRMA" | "PRIVAT" | null;
   /** Ersatzbuchung nach "Ändern": vorheriger Betrag / Text */
   editedFromCents: number | null; editedFromDescription: string | null;
 }
@@ -69,6 +70,7 @@ export async function ledgerRows(
     reversalOfId: ledgerEntries.reversalOfId, reversedType: reversed.type, closingId: ledgerEntries.closingId,
     category: ledgerEntries.category, batchId: ledgerEntries.batchId, attachmentId: ledgerAttachments.id,
     branchId: ledgerEntries.branchId, branchName: branches.name,
+    vatRate: ledgerEntries.vatRate, vatCents: ledgerEntries.vatCents, partnerRole: ledgerEntries.partnerRole,
     editedFromCents: editedBy.previousAmountCents, editedFromDescription: editedBy.previousDescription,
   }).from(ledgerEntries)
     .leftJoin(users, eq(users.id, ledgerEntries.employeeId))

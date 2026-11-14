@@ -62,10 +62,31 @@ export const tenantAdminPasswordSchema = z.object({ password: passwordSchema.opt
 /** Super-Admin: Firma löschen – Kurzname oder LÖSCHEN zur Bestätigung */
 export const tenantDeleteSchema = z.object({ confirm: z.string().trim().min(1, "Bestätigung fehlt").max(80) });
 
+/** Mitarbeiter anlegen: Login nur optional (für Außendienst mit Budget) */
 export const employeeCreateSchema = z.object({
   name: z.string().trim().min(2).max(120),
-  email: z.string().trim().toLowerCase().email(),
-  password: passwordSchema,
+  email: z.string().trim().toLowerCase().email().optional().or(z.literal("")).transform((v) => v || undefined),
+  password: passwordSchema.optional(),
+  withLogin: z.union([z.boolean(), z.literal("on"), z.literal("true"), z.literal("1")]).optional()
+    .transform((v) => v === true || v === "on" || v === "true" || v === "1"),
+  // Stammdaten (optional, werden in EmployeeProfile gespeichert)
+  phone: optStr(40),
+  street: optStr(),
+  zip: optStr(10),
+  city: optStr(100),
+  dateOfBirth: dateStr.optional().nullable(),
+  taxId: optStr(20),
+  socialSecurityNumber: optStr(20),
+  iban: optStr(34),
+  jobTitle: optStr(120),
+  startDate: dateStr.optional().nullable(),
+  monthlyGrossCents: z.preprocess((v) => (v === "" || v == null ? undefined : v), amountCents.optional()),
+  branchId: z.string().trim().max(64).optional().nullable().transform((v) => v || null),
+}).superRefine((v, ctx) => {
+  if (v.withLogin) {
+    if (!v.email) ctx.addIssue({ code: "custom", message: "E-Mail für Login fehlt", path: ["email"] });
+    if (!v.password) ctx.addIssue({ code: "custom", message: "Passwort für Login fehlt", path: ["password"] });
+  }
 });
 
 export const employeeUpdateSchema = z.object({
@@ -74,6 +95,17 @@ export const employeeUpdateSchema = z.object({
   password: passwordSchema.optional(),
   canEnterCashExpense: z.boolean().optional(),
   canEnterOutlay: z.boolean().optional(),
+  canLogin: z.boolean().optional(),
+  email: z.string().trim().toLowerCase().email().optional(),
+});
+
+/** Lohn auszahlen / überweisen */
+export const wagePayoutSchema = z.object({
+  amountCents: positiveAmount,
+  fund: z.enum(["CASH", "BANK"]),
+  bookingDate: dateStr.optional(),
+  description: z.string().trim().min(3).max(300).optional(),
+  branchId: z.string().trim().max(64).optional().nullable().transform((v) => v || null),
 });
 
 export const partnerCreateSchema = z.object({
@@ -247,6 +279,14 @@ const optionalAmount = z.union([z.number().int(), z.string(), z.null()]).optiona
 });
 const personId = z.string().trim().optional().nullable().transform((v) => v || null);
 
+const vatRateField = z.union([z.number(), z.string(), z.null(), z.undefined()]).optional()
+  .transform((v) => {
+    if (v === "" || v == null || v === undefined) return 0;
+    return parseVatRate(v);
+  });
+const vatModeField = z.enum(["GROSS", "NET"]).default("GROSS");
+const partnerRoleField = z.enum(["FIRMA", "PRIVAT"]).optional().nullable().transform((v) => v || null);
+
 /** Tageseinnahme: Kasse und/oder Bank in einem Schritt */
 export const dailyIncomeSchema = z.object({
   bookingDate: dateStr,
@@ -255,6 +295,9 @@ export const dailyIncomeSchema = z.object({
   description: z.string().trim().min(2, "Wofür? fehlt").max(300),
   personId,
   branchId,
+  vatRate: vatRateField,
+  vatMode: vatModeField,
+  partnerRole: partnerRoleField,
 });
 
 /** Betriebsausgabe (Gastro): Herkunft Kasse/Bank oder Budget einer Person */
@@ -266,18 +309,30 @@ export const expenseSchema = z.object({
   bookingDate: dateStr.optional(),
   personId,
   branchId,
+  vatRate: vatRateField,
+  vatMode: vatModeField,
+  partnerRole: partnerRoleField,
 });
 
 /** Buchung löschen (aus allen Ansichten entfernen, Kontostand neu) */
 export const removeEntrySchema = z.object({ reason: z.string().trim().min(3, "Grund fehlt (mind. 3 Zeichen)").max(300) });
 
-/** Buchung ändern: neuer Betrag und/oder neuer Verwendungszweck */
+/** Buchung ändern: Betrag, Zweck, Filiale, Person und/oder Gesellschafter-Art */
 export const editEntrySchema = z.object({
   amountCents: optionalAmount,
   description: z.string().trim().min(2).max(300).optional().nullable().transform((v) => v || null),
   reason: z.string().trim().min(3, "Grund der Änderung fehlt (mind. 3 Zeichen)").max(300),
   branchId: z.string().trim().max(64).optional().nullable(),
-}).refine((v) => v.amountCents !== null || v.description !== null || v.branchId !== undefined, "Bitte neuen Betrag, Verwendungszweck oder Filiale angeben");
+  personId: z.string().trim().max(64).optional().nullable(),
+  /** undefined = nicht anfassen; null = Rolle löschen; FIRMA/PRIVAT = setzen */
+  partnerRole: z.enum(["FIRMA", "PRIVAT"]).nullish(),
+  vatRate: vatRateField.optional(),
+  vatMode: z.enum(["GROSS", "NET"]).optional(),
+}).refine(
+  (v) => v.amountCents !== null || v.description !== null || v.branchId !== undefined
+    || v.personId !== undefined || v.partnerRole !== undefined || v.vatRate !== undefined,
+  "Bitte Betrag, Verwendungszweck, Filiale, Person oder MwSt. ändern",
+);
 
 export const branchSchema = z.object({
   name: z.string().trim().min(2, "Name der Filiale (mind. 2 Zeichen)").max(60),

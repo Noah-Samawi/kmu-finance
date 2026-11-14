@@ -105,6 +105,8 @@ export const users = pgTable("User", {
   canEnterOutlay: boolean("canEnterOutlay").notNull().default(true),
   canViewReports: boolean("canViewReports").notNull().default(false),
   canViewBank: boolean("canViewBank").notNull().default(false),
+  /** false = kein Login (z. B. Küchenhilfe nur für Lohn/Personalakte) */
+  canLogin: boolean("canLogin").notNull().default(true),
   lastLoginAt: timestamp("lastLoginAt", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -266,6 +268,21 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   batchId: text("batchId"),
   /** Filiale / Standort (optional; null = zentrale Verwaltungskosten). Bestände je Filiale = SUM der Deltas. */
   branchId: text("branchId").references(() => branches.id),
+  /** MwSt.-Satz in Basispunkten (1900 = 19 %), null = nicht erfasst */
+  vatRate: integer("vatRate"),
+  /**
+   * MwSt.-Bewegung: Einnahme +, Ausgabe −.
+   * Saldo = SUM(vatCents) ≈ Umsatzsteuer-Schuld (positiv) bzw. Vorsteuer-Überhang (negativ).
+   * Kasse/Bank buchen immer den Brutto-Zahlungsbetrag – die MwSt. ist hier nur getrennt ausgewiesen.
+   */
+  vatCents: integer("vatCents").notNull().default(0),
+  /** GROSS = Eingabe inkl. MwSt., NET = Eingabe zzgl. MwSt. */
+  vatMode: text("vatMode").$type<"GROSS" | "NET">(),
+  /**
+   * Bei Zuordnung zu einem Gesellschafter:
+   * FIRMA = Betriebsausgabe (Partner-Konto nur verknüpft), PRIVAT = Privatentnahme vom Gewinnanteil.
+   */
+  partnerRole: text("partnerRole").$type<"FIRMA" | "PRIVAT">(),
   createdAt: createdAt(), // KEIN updatedAt: unveränderlich
 }, (t) => [
   index("Ledger_tenant_date_idx").on(t.tenantId, t.bookingDate),
@@ -455,10 +472,17 @@ export const bankStatements = pgTable("BankStatement", {
   fileName: text("fileName").notNull(),
   fileMime: text("fileMime").notNull(),
   fileKey: text("fileKey").notNull(),
+  /** SHA-256 der Originaldatei – verhindert Doppel-Import desselben Auszugs */
+  fileSha256: text("fileSha256"),
+  openingCents: integer("openingCents"),
+  closingCents: integer("closingCents"),
   branchId: text("branchId").references(() => branches.id),
   createdById: text("createdById").notNull().references(() => users.id),
   createdAt: createdAt(),
-}, (t) => [index("BankStatement_tenant_month_idx").on(t.tenantId, t.periodMonth)]);
+}, (t) => [
+  index("BankStatement_tenant_month_idx").on(t.tenantId, t.periodMonth),
+  index("BankStatement_tenant_sha_idx").on(t.tenantId, t.fileSha256),
+]);
 
 export const bankTransactions = pgTable("BankTransaction", {
   id: id(),

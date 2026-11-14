@@ -15,10 +15,11 @@ import { assertPurpose } from "@/domain/partner";
 import {
   FUND_LABEL, categoryLabel, correctionDiff, correctionText, dailyIncomeParts, duplicateWarning, duplicateWarnings, expenseDeltas,
 } from "@/domain/cash";
+import { splitVat, vatLedgerSign } from "@/domain/vat-booking";
 import { dateInputToDate, dayRange, todayKey } from "@/domain/period";
 import { balanceCorrectionSchema, dailyIncomeSchema, expenseSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
-import { accountBalance, audit, bankBalance, cashBalance, insertEntry, insufficient, walletBalance } from "../ledger-service";
+import { accountBalance, audit, bankBalance, cashBalance, insertEntry, insufficient, partnerBalance, walletBalance } from "../ledger-service";
 import { assertBranch } from "../branches/assert-branch";
 import { parseReceiptDataUrl } from "../receipts/inline-file";
 import { storeReceiptFile, type UploadFile } from "../receipts/store-file";
@@ -113,26 +114,49 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
   const tenantId = tid(ctx);
   assertNotFuture(input.bookingDate);
   const parts = dailyIncomeParts(input.cashCents, input.bankCents);
+  const vatMode = input.vatMode ?? "GROSS";
+  const vatRate = input.vatRate ?? 0;
   return withTenant(ctx, async (tx) => {
     await lockTenantLedger(tx, tenantId);
     const person = input.personId ? await loadPerson(tx, tenantId, input.personId) : null;
+    if (person?.role === "PARTNER" && !input.partnerRole) {
+      throw rule("Gesellschafter gewählt: bitte „Firmenausgabe / Betriebsausgabe“ oder „Privatentnahme / Gewinnanteil“ angeben");
+    }
+    const privat = person?.role === "PARTNER" && input.partnerRole === "PRIVAT";
     const branchId = await assertBranch(tx, tenantId, input.branchId);
     const existing = countOn(await incomesOn(tx, tenantId, input.bookingDate));
     const batchId = parts.length > 1 ? randomUUID() : null;
     const bookingDate = bookingDateFor(input.bookingDate);
     const entries = [];
     for (const p of parts) {
+      if (privat) {
+        // Einlage / Gewinnanteil auf dem Gesellschafter-Kapitalkonto
+        entries.push(await insertEntry(tx, ctx, tenantId, {
+          type: "PARTNER_DEPOSIT", ...deltasFor("PARTNER_DEPOSIT", p.amountCents, p.account),
+          employeeId: person!.id, batchId, bookingDate, branchId, partnerRole: "PRIVAT",
+          description: [input.description || "Einlage / Gewinnanteil", ACCOUNT_LABEL[p.account], `von ${person!.name}`].join(" · "),
+        }));
+        continue;
+      }
+      const vat = splitVat(p.amountCents, vatRate, vatMode);
+      // Kasse/Bank: Brutto-Zahlungsbetrag; MwSt. getrennt positiv (Einnahmen)
       entries.push(await insertEntry(tx, ctx, tenantId, {
-        type: "INCOME_MANUAL", ...deltasFor("INCOME_MANUAL", p.amountCents, p.account),
+        type: "INCOME_MANUAL", ...deltasFor("INCOME_MANUAL", vat.grossCents, p.account),
         employeeId: person?.id ?? null, batchId, bookingDate, branchId,
-        description: [input.description, ACCOUNT_LABEL[p.account], person && `über ${person.name}`].filter(Boolean).join(" · "),
+        vatRate: vat.vatRate || null, vatCents: vatLedgerSign("INCOME", vat.vatCents), vatMode: vat.vatRate ? vat.mode : null,
+        partnerRole: person?.role === "PARTNER" ? input.partnerRole : null,
+        description: [input.description, ACCOUNT_LABEL[p.account], person && `über ${person.name}`,
+          vat.vatCents ? `inkl. ${vat.vatRate / 100} % MwSt.` : null].filter(Boolean).join(" · "),
       }));
     }
     await audit(tx, ctx, "cash.daily-income", "LedgerEntry", entries[0].id, {
       batchId, date: input.bookingDate, cashCents: input.cashCents ?? 0, bankCents: input.bankCents ?? 0,
-      personId: person?.id ?? null, existingCash: existing.CASH, existingBank: existing.BANK,
+      personId: person?.id ?? null, existingCash: existing.CASH, existingBank: existing.BANK, vatRate, vatMode,
     });
-    const booked = (a: "CASH" | "BANK") => parts.find((p) => p.account === a)?.amountCents ?? 0;
+    const booked = (a: "CASH" | "BANK") => {
+      const raw = parts.find((p) => p.account === a)?.amountCents ?? 0;
+      return raw ? splitVat(raw, vatRate, vatMode).grossCents : 0;
+    };
     return {
       entries, batchId, cashCents: booked("CASH"), bankCents: booked("BANK"),
       warnings: duplicateWarnings(dateInputToDate(input.bookingDate), existing, {
@@ -146,7 +170,8 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
 
 /**
  * Betriebsausgabe (z. B. Metro-Einkauf): Herkunft Kasse oder Bank – optional einer Person zugeordnet –
- * oder aus dem Budget eines Mitarbeiters. Ohne Beleg ist eine Begründung (≥ 10 Zeichen) Pflicht.
+ * oder aus dem Budget eines Mitarbeiters. Gesellschafter: FIRMA (Betriebsausgabe) oder PRIVAT (Entnahme).
+ * Kasse/Bank buchen den Brutto-Betrag; MwSt. wird getrennt als Vorsteuer (−) geführt.
  */
 export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchema>, file?: UploadFile | null) {
   requireRole(ctx, "ADMIN");
@@ -154,39 +179,67 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
   assertNotFuture(input.bookingDate);
   assertPurpose(input.purpose, !!file);
   if (input.fund === "BUDGET" && !input.personId) throw rule("Ausgabe aus dem Budget: bitte Person auswählen");
-  const deltas = expenseDeltas(input.fund, input.amountCents);
+  const vat = splitVat(input.amountCents, input.vatRate ?? 0, input.vatMode ?? "GROSS");
   const stored = file ? await storeReceiptFile(tenantId, "expense-receipts", file) : null;
   return withTenant(ctx, async (tx) => {
     await lockTenantLedger(tx, tenantId);
     const person = input.personId ? await loadPerson(tx, tenantId, input.personId) : null;
     const branchId = await assertBranch(tx, tenantId, input.branchId);
+    const isPartner = person?.role === "PARTNER";
+    if (isPartner && !input.partnerRole) {
+      throw rule("Gesellschafter gewählt: bitte „Firmenausgabe / Betriebsausgabe“ oder „Auszahlung / Privatentnahme“ angeben");
+    }
+    const privat = isPartner && input.partnerRole === "PRIVAT";
+    const payCents = vat.grossCents;
+
     if (input.fund === "BUDGET") {
-      if (person!.role !== "EMPLOYEE") throw rule("Einkäufe von Gesellschaftern bitte unter Partner & Gesellschafter buchen (Kapital oder Budget)");
+      if (person!.role !== "EMPLOYEE") throw rule("Budget-Ausgaben nur für Mitarbeiter – Gesellschafter: Firmenausgabe oder Privatentnahme wählen");
       const w = await walletBalance(tx, tenantId, person!.id);
-      if (w < input.amountCents) throw insufficient(`Budget von ${person!.name}`, w);
+      if (w < payCents) throw insufficient(`Budget von ${person!.name}`, w);
     } else {
       const avail = await accountBalance(tx, tenantId, input.fund);
-      if (avail < input.amountCents) throw insufficient(ACCOUNT_LABEL[input.fund], avail);
+      if (avail < payCents) throw insufficient(ACCOUNT_LABEL[input.fund], avail);
     }
+    if (privat) {
+      const cap = await partnerBalance(tx, tenantId, person!.id);
+      if (cap < payCents) throw insufficient(`Kapitalkonto von ${person!.name}`, cap);
+    }
+
+    // PRIVAT → PARTNER_DRAW (Kapital −, Kasse/Bank −); FIRMA → EXPENSE mit Partner-Verknüpfung
+    const type = privat ? "PARTNER_DRAW" as const : "EXPENSE" as const;
+    const deltas = privat
+      ? deltasFor("PARTNER_DRAW", payCents, input.fund === "BANK" ? "BANK" : "CASH")
+      : expenseDeltas(input.fund, payCents);
+
     const entry = await insertEntry(tx, ctx, tenantId, {
-      type: "EXPENSE", ...deltas, category: input.category, branchId,
+      type, ...deltas, category: privat ? null : input.category, branchId,
       employeeId: person?.id ?? null, bookingDate: bookingDateFor(input.bookingDate),
-      description: [categoryLabel(input.category), input.purpose.trim(), `aus ${FUND_LABEL[input.fund]}`, person && input.fund !== "BUDGET" && `durch ${person.name}`]
-        .filter(Boolean).join(" · "),
+      vatRate: vat.vatRate || null, vatCents: privat ? 0 : vatLedgerSign("EXPENSE", vat.vatCents),
+      vatMode: !privat && vat.vatRate ? vat.mode : null,
+      partnerRole: isPartner ? input.partnerRole : null,
+      description: [
+        privat ? "Privatentnahme / Gewinnanteil" : categoryLabel(input.category),
+        input.purpose.trim(),
+        `aus ${FUND_LABEL[input.fund]}`,
+        person && (privat ? `an ${person.name}` : input.fund !== "BUDGET" && `durch ${person.name}`),
+        !privat && vat.vatCents ? `inkl. ${vat.vatRate / 100} % MwSt.` : null,
+      ].filter(Boolean).join(" · "),
     });
     if (stored) {
       await tx.insert(ledgerAttachments).values({
         tenantId, ledgerEntryId: entry.id, fileKey: stored.key, mime: stored.mime, name: stored.name, createdById: ctx.userId,
       });
     }
-    await audit(tx, ctx, "cash.expense", "LedgerEntry", entry.id, {
-      fund: input.fund, category: input.category, amountCents: input.amountCents, personId: person?.id ?? null, receipt: !!stored, branchId,
+    await audit(tx, ctx, privat ? "partner.draw" : "cash.expense", "LedgerEntry", entry.id, {
+      fund: input.fund, category: input.category, amountCents: payCents, netCents: vat.netCents, vatCents: vat.vatCents,
+      personId: person?.id ?? null, partnerRole: input.partnerRole, receipt: !!stored, branchId,
     });
     return {
       entry,
       cashBalanceCents: await cashBalance(tx, tenantId),
       bankBalanceCents: await bankBalance(tx, tenantId),
       walletBalanceCents: person ? await walletBalance(tx, tenantId, person.id) : null,
+      capitalCents: person?.role === "PARTNER" ? await partnerBalance(tx, tenantId, person.id) : null,
     };
   });
 }

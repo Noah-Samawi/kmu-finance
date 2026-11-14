@@ -8,6 +8,7 @@ import { categoryLabel, entryLabel } from "@/domain/cash";
 import { Empty, Money, Pill } from "./ui";
 import { EntryActions } from "./entry-actions";
 import type { BranchOption } from "./branch-category";
+import type { PersonOption } from "./cash-forms";
 
 function label(r: LedgerRow) {
   return r.type === "REVERSAL" && r.reversedType
@@ -21,9 +22,9 @@ function label(r: LedgerRow) {
  *  - "wallet": Wirkung auf das Mitarbeiterkonto
  *  - "both": beide (Admin-Journal)
  */
-export function LedgerList({ rows, mode, showEmployee, admin, reversedIds, branches, emptyTitle }: {
+export function LedgerList({ rows, mode, showEmployee, admin, reversedIds, branches, persons, emptyTitle }: {
   rows: LedgerRow[]; mode: "pool" | "wallet" | "both"; showEmployee?: boolean; admin?: boolean; reversedIds?: Set<string>;
-  branches?: BranchOption[]; emptyTitle?: string;
+  branches?: BranchOption[]; persons?: PersonOption[]; emptyTitle?: string;
 }) {
   if (!rows.length) return <Empty title={emptyTitle ?? "Noch keine Buchungen"} />;
   const reversed = reversedIds ?? new Set(rows.filter((r) => r.reversalOfId).map((r) => r.reversalOfId!));
@@ -39,6 +40,11 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds, branc
               {reversed.has(r.id) && r.type !== "RECEIPT" && <Pill>storniert</Pill>}
               {r.closingId && <Pill>abgeschlossen</Pill>}
               {r.category && <Pill tone="amber">{categoryLabel(r.category)}</Pill>}
+              {r.partnerRole === "PRIVAT" && <Pill tone="amber">Privatentnahme</Pill>}
+              {r.partnerRole === "FIRMA" && <Pill>Betriebsausgabe</Pill>}
+              {r.vatCents !== 0 && r.vatRate != null && (
+                <Pill>MwSt {r.vatRate / 100} % · {formatCents(Math.abs(r.vatCents))}</Pill>
+              )}
               {r.batchId && <Pill>Kasse und Bank am selben Tag</Pill>}
               {r.branchName && <Pill tone="green">{r.branchName}</Pill>}
               {r.editedFromCents != null && <Pill>{`geändert (vorher ${formatCents(r.editedFromCents)})`}</Pill>}
@@ -92,8 +98,12 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds, branc
               </span>
             )}
             {admin && DIRECTLY_REVERSIBLE.includes(r.type) && !reversed.has(r.id) && !r.closingId && (
-              <EntryActions id={r.id} amountCents={entryAmount(r)} description={r.description ?? ""} branchId={r.branchId}
-                branches={branches} canEdit={!r.receiptId} editHint={r.receiptId ? "Beleg-Buchung: über Belege prüfen korrigieren" : undefined} />
+              <EntryActions
+                id={r.id} amountCents={entryAmount(r)} description={r.description ?? ""}
+                branchId={r.branchId} branches={branches}
+                persons={persons} personId={r.employeeId} partnerRole={r.partnerRole}
+                canEdit={!r.receiptId} editHint={r.receiptId ? "Beleg-Buchung: über Belege prüfen korrigieren" : undefined}
+              />
             )}
           </div>
         </li>

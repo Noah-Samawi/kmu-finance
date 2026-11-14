@@ -29,6 +29,9 @@ export const POST = route(["ADMIN"], async ({ req, ctx }) => {
     bookingDate: form.get("bookingDate") || undefined,
     personId: form.get("personId") || undefined,
     branchId: form.get("branchId") || null,
+    vatRate: form.get("vatRate") || 0,
+    vatMode: form.get("vatMode") || "GROSS",
+    partnerRole: form.get("partnerRole") || null,
   });
   return recordExpense(ctx, input, await readUpload(form.get("file")));
 });

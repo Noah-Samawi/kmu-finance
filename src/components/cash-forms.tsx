@@ -7,6 +7,7 @@ import { EXPENSE_CATEGORIES, FUND_LABEL, type ExpenseFund } from "@/domain/cash"
 import type { ScanResult } from "@/domain/ocr";
 import { ReceiptCapture } from "./receipt-capture";
 import { BranchSelect, CategoryField, type BranchOption } from "./branch-category";
+import { PartnerRoleField, VatFields } from "./vat-fields";
 import { REASON_MIN_WITHOUT_RECEIPT } from "@/domain/partner";
 import { formatCents, parseEuroToCents } from "@/domain/money";
 import { fmtDate } from "@/domain/period";
@@ -32,15 +33,19 @@ const EXPENSE_CHANNEL: Record<Exclude<ExpenseFund, "CAPITAL">, string> = {
 const dateLabel = (day: string) => fmtDate(new Date(`${day}T12:00:00Z`));
 
 /** Optionales Dropdown "Person zuordnen" – bei fester Person nur ein verstecktes Feld */
-export function PersonSelect({ persons, preset, required, label }: {
+export function PersonSelect({ persons, preset, required, label, value, onChange }: {
   persons: PersonOption[]; preset?: PersonOption | null; required?: boolean; label?: string;
+  value?: string; onChange?: (id: string) => void;
 }) {
   if (preset) return <input type="hidden" name="personId" value={preset.id} />;
   const employees = persons.filter((p) => p.role === "EMPLOYEE" && p.isActive !== false);
   const partners = persons.filter((p) => p.role === "PARTNER" && p.isActive !== false);
+  const ctrl = value !== undefined
+    ? { value, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => onChange?.(e.target.value) }
+    : { defaultValue: "" };
   return (
     <Field label={label ?? "Person zuordnen (Mitarbeiter / Partner / Gesellschafter)"} hint={required ? undefined : "Optional – verknüpft die Buchung mit dem Personenkonto und Einzelbericht"}>
-      <select name="personId" defaultValue="" required={required} className={inputCls}>
+      <select name="personId" required={required} className={inputCls} {...ctrl}>
         <option value="">{required ? "Bitte wählen …" : "– keine Person –"}</option>
         {employees.length > 0 && (
           <optgroup label="Mitarbeiter">
@@ -103,10 +108,14 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
   const [date, setDate] = useState(today);
   const [cash, setCash] = useState("");
   const [bank, setBank] = useState("");
+  const [personId, setPersonId] = useState(preset?.id ?? "");
+  const [partnerRole, setPartnerRole] = useState<"" | "FIRMA" | "PRIVAT">("");
   const [tick, setTick] = useState(0);
   const [done, setDone] = useState<string | null>(null);
   const info = useDayIncomes(date, tick);
   const hasCash = !!cents(cash), hasBank = !!cents(bank);
+  const selected = persons.find((p) => p.id === personId);
+  const isPartner = selected?.role === "PARTNER";
 
   return (
     <form className="space-y-3" onSubmit={async (e) => {
@@ -114,11 +123,13 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
       setDone(null);
       if ((cash && cents(cash) === null) || (bank && cents(bank) === null)) return setError("Ungültiger Betrag");
       if (!hasCash && !hasBank) return setError("Bitte Betrag für Kasse (Bar) und/oder Bankkonto eingeben");
+      if (isPartner && !partnerRole) return setError("Bitte Art der Gesellschafter-Buchung wählen");
       const form = e.currentTarget;
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
       const r = await call<{ cashCents: number; bankCents: number }>("POST", "/api/v1/cash/income", {
-        bookingDate: date, cashCents: cash || null, bankCents: bank || null, description: f.description, personId: f.personId || null,
-        branchId: f.branchId || null,
+        bookingDate: date, cashCents: cash || null, bankCents: bank || null, description: f.description,
+        personId: personId || null, branchId: f.branchId || null,
+        vatRate: f.vatRate, vatMode: f.vatMode, partnerRole: partnerRole || null,
       });
       if (r) {
         setDone([
@@ -126,7 +137,7 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
           r.cashCents ? `Tageseinnahme Kasse (Bar) +${formatCents(r.cashCents)}` : null,
           r.bankCents ? `Tageseinnahme Bankkonto +${formatCents(r.bankCents)}` : null,
         ].filter(Boolean).join(" "));
-        setCash(""); setBank("");
+        setCash(""); setBank(""); setPartnerRole("");
         (form.elements.namedItem("description") as HTMLInputElement).value = "";
         setTick((t) => t + 1);
       }
@@ -144,11 +155,13 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
       </div>
       {info && hasCash && <DuplicateWarning account="CASH" day={info.cash} />}
       {info && hasBank && <DuplicateWarning account="BANK" day={info.bank} />}
+      <VatFields amount={cash || bank || ""} />
       <Field label="Wofür?"><input name="description" required minLength={2} defaultValue="Tageseinnahme" className={inputCls} dir="auto" /></Field>
       <div className="grid gap-3 sm:grid-cols-2">
-        <PersonSelect persons={persons} preset={preset} />
+        <PersonSelect persons={persons} preset={preset} value={personId} onChange={(id) => { setPersonId(id); setPartnerRole(""); }} />
         <BranchSelect branches={branches} />
       </div>
+      <PartnerRoleField show={isPartner} value={partnerRole} onChange={setPartnerRole} />
       <ErrorNote error={error} />
       {done && <p className="text-sm font-medium text-ledger">{done}</p>}
       <button disabled={busy} className={cx(btn.base, btn.primary, "w-full")}>
@@ -177,16 +190,22 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
   const [purpose, setPurpose] = useState("");
   const [date, setDate] = useState(today);
   const [category, setCategory] = useState("WAREN");
+  const [personId, setPersonId] = useState(preset?.id ?? "");
+  const [partnerRole, setPartnerRole] = useState<"" | "FIRMA" | "PRIVAT">("");
+  const [vatRate, setVatRate] = useState(0);
   const autoPurpose = useRef("");
   const started = useRef(false);
   const [ocr, setOcr] = useState<{ busy: boolean; hint: (ScanResult & { text: string }) | null; error: string | null }>(
     { busy: false, hint: null, error: null },
   );
+  const selected = persons.find((p) => p.id === personId);
+  const isPartner = selected?.role === "PARTNER";
 
   /** Erkannte Werte direkt eintragen – der Nutzer gleicht nur noch mit dem Foto ab */
   function fill(h: ScanResult) {
     if (h.amountCents) setAmount(centsToInput(h.amountCents));
     if (h.date && h.date <= today) setDate(h.date);
+    if (h.vatRate) setVatRate(h.vatRate);
     const cat = h.customCategory ?? h.category;
     if (cat) setCategory(cat);
     const text = h.merchant ? (h.description ? `${h.merchant} – ${h.description}` : `${h.merchant} – Einkauf`) : h.description ?? "";
@@ -234,9 +253,13 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
       if (!file && purpose.trim().length < REASON_MIN_WITHOUT_RECEIPT) {
         return setError(`Ohne Beleg ist eine Begründung Pflicht (mindestens ${REASON_MIN_WITHOUT_RECEIPT} Zeichen)`);
       }
+      if (isPartner && !partnerRole) return setError("Bitte Art der Gesellschafter-Buchung wählen");
       fd.set("fund", fund);
+      fd.set("personId", personId);
+      if (partnerRole) fd.set("partnerRole", partnerRole); else fd.delete("partnerRole");
       if (await call("POST", "/api/v1/cash/expenses", fd)) {
-        form.reset(); setFile(null); setAmount(""); setPurpose(""); setDate(today); setCategory("WAREN"); autoPurpose.current = "";
+        form.reset(); setFile(null); setAmount(""); setPurpose(""); setDate(today); setCategory("WAREN");
+        setPersonId(preset?.id ?? ""); setPartnerRole(""); setVatRate(0); autoPurpose.current = "";
         setOcr({ busy: false, hint: null, error: null });
         onBooked?.();
       }
@@ -283,15 +306,19 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
         <Field label="Betrag"><input name="amount" value={amount} onChange={(e) => setAmount(e.target.value)} required inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} /></Field>
         <Field label="Datum"><input name="bookingDate" type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
       </div>
+      <VatFields amount={amount} defaultRate={vatRate} key={vatRate} />
       <Field label={file ? "Wofür?" : `Wofür? / Begründung (ohne Beleg mind. ${REASON_MIN_WITHOUT_RECEIPT} Zeichen)`}>
         <input name="purpose" value={purpose} onChange={(e) => setPurpose(e.target.value)} required minLength={3} placeholder="z. B. Metro – Fleisch und Gemüse" className={inputCls} dir="auto" />
       </Field>
       <div className="grid gap-3 sm:grid-cols-2">
         {fund === "BUDGET" && !preset
-          ? <PersonSelect persons={persons.filter((p) => p.role === "EMPLOYEE")} required label="Aus dem Budget von" />
-          : <PersonSelect persons={persons} preset={preset} />}
+          ? <PersonSelect persons={persons.filter((p) => p.role === "EMPLOYEE")} required label="Aus dem Budget von"
+              value={personId} onChange={(id) => { setPersonId(id); setPartnerRole(""); }} />
+          : <PersonSelect persons={persons} preset={preset} value={personId}
+              onChange={(id) => { setPersonId(id); setPartnerRole(""); }} />}
         <BranchSelect branches={branches} />
       </div>
+      <PartnerRoleField show={isPartner} value={partnerRole} onChange={setPartnerRole} />
       <ErrorNote error={error} />
       <button disabled={busy || ocr.busy} className={cx(btn.base, btn.primary, "w-full")}>{ocr.busy ? "Beleg wird analysiert …" : "Speichern / Buchen"}</button>
     </form>

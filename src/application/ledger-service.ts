@@ -24,7 +24,7 @@ export function branchPred(branchId?: BranchScope) {
 async function sumCol(
   tx: Tx, tenantId: string,
   col: typeof ledgerEntries.poolDeltaCents | typeof ledgerEntries.cashDeltaCents | typeof ledgerEntries.bankDeltaCents
-    | typeof ledgerEntries.claimDeltaCents | typeof ledgerEntries.partnerDeltaCents,
+    | typeof ledgerEntries.claimDeltaCents | typeof ledgerEntries.partnerDeltaCents | typeof ledgerEntries.vatCents,
   before?: Date,
   branchId?: BranchScope,
 ) {
@@ -185,6 +185,10 @@ export interface NewEntry {
   category?: string | null;
   batchId?: string | null;
   branchId?: string | null;
+  vatRate?: number | null;
+  vatCents?: number;
+  vatMode?: "GROSS" | "NET" | null;
+  partnerRole?: "FIRMA" | "PRIVAT" | null;
 }
 
 export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntry) {
@@ -200,6 +204,10 @@ export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntr
       bankDeltaCents,
       claimDeltaCents: e.claimDeltaCents ?? 0,
       partnerDeltaCents: e.partnerDeltaCents ?? 0,
+      vatRate: e.vatRate ?? null,
+      vatCents: e.vatCents ?? 0,
+      vatMode: e.vatMode ?? null,
+      partnerRole: e.partnerRole ?? null,
       poolDeltaCents: e.poolDeltaCents || cashDeltaCents + bankDeltaCents,
       bookingDate,
       tenantId,
@@ -207,6 +215,29 @@ export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntr
     })
     .returning();
   return row;
+}
+
+/** MwSt.-Konto: Summe der vatCents (Einnahmen +, Ausgaben −) */
+export async function vatBalance(tx: Tx, tenantId: string, before?: Date, branchId?: BranchScope): Promise<number> {
+  return sumCol(tx, tenantId, ledgerEntries.vatCents, before, branchId);
+}
+
+/** MwSt. Einnahmen / Ausgaben / Saldo – getrennt vom Firmenkapital */
+export async function vatAccount(tx: Tx, tenantId: string, before?: Date, branchId?: BranchScope) {
+  const [r] = await tx
+    .select({
+      income: sql<string>`coalesce(sum(case when ${ledgerEntries.vatCents} > 0 then ${ledgerEntries.vatCents} else 0 end), 0)::bigint`,
+      expense: sql<string>`coalesce(sum(case when ${ledgerEntries.vatCents} < 0 then -${ledgerEntries.vatCents} else 0 end), 0)::bigint`,
+    })
+    .from(ledgerEntries)
+    .where(and(
+      eq(ledgerEntries.tenantId, tenantId),
+      before ? lt(ledgerEntries.bookingDate, before) : undefined,
+      branchPred(branchId),
+    ));
+  const incomeCents = Number(r.income);
+  const expenseCents = Number(r.expense);
+  return { incomeCents, expenseCents, balanceCents: incomeCents - expenseCents };
 }
 
 export function insufficient(what: string, available: number) {
