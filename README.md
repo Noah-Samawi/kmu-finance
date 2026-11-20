@@ -11,8 +11,9 @@ cp .env.example .env
 docker compose up -d                       # Postgres auf :5432
 
 npm run db:migrate                         # Tabellen + RLS + Rolle app_user_role
-psql "postgresql://postgres:postgres@localhost:5432/kmu_finance" \
-  -c "CREATE ROLE kmu_app LOGIN PASSWORD 'kmu_app' IN ROLE app_user_role;"
+APP_DB_PASSWORD=kmu_app npm run db:ensure-app-role   # Login-Rolle kmu_app (NOBYPASSRLS)
+# DATABASE_URL in .env auf kmu_app setzen; MIGRATION_DATABASE_URL = Owner
+npm run db:smoke-rls                       # Prüfen: RLS aktiv
 npm run db:seed                            # Super-Admin anlegen
 
 npm run dev                                # http://localhost:3000
