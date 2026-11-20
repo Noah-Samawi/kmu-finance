@@ -14,9 +14,11 @@ const DEFAULT_FROM = "onboarding@resend.dev";
 
 export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; mode: "resend" | "log"; id?: string }> {
   const key = process.env.RESEND_API_KEY?.trim();
-  // EMAIL_FROM nur wenn gesetzt und gültig; sonst fester Resend-Test-Absender
+  // Fester Resend-Test-Absender (eigene Domain erst nach Verifizierung via EMAIL_FROM)
   const fromEnv = process.env.EMAIL_FROM?.trim();
-  const from = fromEnv && fromEnv.includes("@") ? fromEnv : DEFAULT_FROM;
+  const from = fromEnv === DEFAULT_FROM || fromEnv?.endsWith("@resend.dev")
+    ? (fromEnv || DEFAULT_FROM)
+    : DEFAULT_FROM;
 
   console.info("[email] send start", {
     to: input.to,
