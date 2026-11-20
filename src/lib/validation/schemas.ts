@@ -54,7 +54,7 @@ export const tenantCreateSchema = z.object({
 export const tenantUpdateSchema = tenantCreateSchema
   .omit({ admin: true, slug: true })
   .partial()
-  .extend({ status: z.enum(["ACTIVE", "SUSPENDED"]).optional() });
+  .extend({ status: z.enum(["ACTIVE", "SUSPENDED", "PENDING", "BLOCKED"]).optional() });
 
 /** Super-Admin: Passwort des ersten Firmen-Admins setzen (leer = zufällig erzeugen) */
 export const tenantAdminPasswordSchema = z.object({ password: passwordSchema.optional() });

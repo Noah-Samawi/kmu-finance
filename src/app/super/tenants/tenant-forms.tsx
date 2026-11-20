@@ -68,7 +68,7 @@ export function CreateTenantForm() {
 }
 
 export interface TenantRow {
-  id: string; name: string; slug: string; status: "ACTIVE" | "SUSPENDED";
+  id: string; name: string; slug: string; status: "ACTIVE" | "SUSPENDED" | "PENDING" | "BLOCKED";
   legalName: string; street: string; zip: string; city: string;
   taxNumber: string | null; vatId: string | null; iban: string | null; bic: string | null;
   smallBusiness: boolean; adminEmail: string | null; adminName: string | null;
@@ -81,7 +81,8 @@ export function TenantActions({ t }: { t: TenantRow }) {
   const { call, busy, error } = useApi();
   const [menu, setMenu] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
-  const suspend = t.status === "ACTIVE";
+  const canSuspend = t.status === "ACTIVE" || t.status === "PENDING";
+  const isLocked = t.status === "SUSPENDED" || t.status === "BLOCKED";
 
   function toggleMenu(e: React.MouseEvent<HTMLButtonElement>) {
     if (menu) return setMenu(null);
@@ -117,11 +118,17 @@ export function TenantActions({ t }: { t: TenantRow }) {
           <div role="menu" style={{ top: menu.top, bottom: menu.bottom, right: menu.right }}
             className="fixed z-50 w-60 overflow-hidden rounded-xl border border-line bg-surface py-1 text-start shadow-lg">
             <MenuItem onClick={() => pick("password")}>Passwort zurücksetzen</MenuItem>
+            {t.status === "PENDING" && (
+              <MenuItem onClick={() => {
+                setMenu(null);
+                call("PATCH", `/api/v1/super/tenants/${t.id}`, { status: "ACTIVE" });
+              }}>Freigeben</MenuItem>
+            )}
             <MenuItem onClick={() => {
               setMenu(null);
-              if (suspend && !confirm(`Firma „${t.name}“ sperren? Alle Benutzer werden sofort abgemeldet.`)) return;
-              call("PATCH", `/api/v1/super/tenants/${t.id}`, { status: suspend ? "SUSPENDED" : "ACTIVE" });
-            }}>{suspend ? "Sperren" : "Entsperren"}</MenuItem>
+              if (canSuspend && !confirm(`Konto „${t.name}“ sperren? Alle Benutzer werden sofort abgemeldet.`)) return;
+              call("PATCH", `/api/v1/super/tenants/${t.id}`, { status: canSuspend ? "BLOCKED" : "ACTIVE" });
+            }}>{canSuspend ? "Sperren" : isLocked ? "Entsperren" : "Sperren"}</MenuItem>
             <MenuItem onClick={() => pick("edit")}>Bearbeiten</MenuItem>
             <div className="my-1 border-t border-line" />
             <MenuItem danger onClick={() => pick("delete")}>Firma löschen</MenuItem>

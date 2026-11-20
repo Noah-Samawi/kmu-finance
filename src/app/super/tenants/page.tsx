@@ -26,7 +26,11 @@ export default async function TenantsPage() {
                   <td className={td + " hidden break-all text-muted md:table-cell"}>{t.adminEmail ?? "–"}</td>
                   <td className={td + " tabular hidden md:table-cell"}>{t.userCount}</td>
                   <td className={td + " hidden text-muted md:table-cell"}>{fmtDate(t.createdAt)}</td>
-                  <td className={td}>{t.status === "ACTIVE" ? <Pill tone="green">Aktiv</Pill> : <Pill tone="red">Gesperrt</Pill>}</td>
+                  <td className={td}>
+                    {t.status === "ACTIVE" && <Pill tone="green">Aktiv</Pill>}
+                    {t.status === "PENDING" && <Pill tone="amber">Wartend</Pill>}
+                    {(t.status === "SUSPENDED" || t.status === "BLOCKED") && <Pill tone="red">Gesperrt</Pill>}
+                  </td>
                   <td className={td + " text-right"}><TenantActions t={t} /></td>
                 </tr>
               ))}
