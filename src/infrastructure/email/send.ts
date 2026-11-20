@@ -9,11 +9,33 @@ export interface SendEmailInput {
   html?: string;
 }
 
-export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; mode: "resend" | "log" }> {
-  const key = process.env.RESEND_API_KEY?.trim();
-  const from = process.env.EMAIL_FROM?.trim() || "Kassenbuch <onboarding@resend.dev>";
+/** Resend-Test-Absender (verifizierte Domain von Resend) */
+const DEFAULT_FROM = "onboarding@resend.dev";
 
-  if (key) {
+export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; mode: "resend" | "log"; id?: string }> {
+  const key = process.env.RESEND_API_KEY?.trim();
+  // EMAIL_FROM nur wenn gesetzt und gültig; sonst fester Resend-Test-Absender
+  const fromEnv = process.env.EMAIL_FROM?.trim();
+  const from = fromEnv && fromEnv.includes("@") ? fromEnv : DEFAULT_FROM;
+
+  console.info("[email] send start", {
+    to: input.to,
+    subject: input.subject,
+    from,
+    hasKey: Boolean(key),
+    keyPrefix: key ? `${key.slice(0, 6)}…` : null,
+  });
+
+  if (!key) {
+    console.warn("[email] RESEND_API_KEY fehlt – nur Console-Log", {
+      to: input.to,
+      subject: input.subject,
+    });
+    console.info("[email:dev]", { to: input.to, subject: input.subject, text: input.text });
+    return { ok: true, mode: "log" };
+  }
+
+  try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -25,19 +47,42 @@ export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; m
         to: [input.to],
         subject: input.subject,
         text: input.text,
-        html: input.html ?? `<pre style="font-family:sans-serif">${escapeHtml(input.text)}</pre>`,
+        html: input.html ?? `<pre style="font-family:sans-serif;white-space:pre-wrap">${escapeHtml(input.text)}</pre>`,
       }),
     });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      console.error("[email] Resend failed", res.status, body);
-      throw new Error("E-Mail konnte nicht gesendet werden");
-    }
-    return { ok: true, mode: "resend" };
-  }
 
-  console.info("[email:dev]", { to: input.to, subject: input.subject, text: input.text });
-  return { ok: true, mode: "log" };
+    const bodyText = await res.text().catch(() => "");
+    let parsed: { id?: string; message?: string; name?: string } = {};
+    try {
+      parsed = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+      /* plain text */
+    }
+
+    if (!res.ok) {
+      console.error("[email] Resend failed", {
+        status: res.status,
+        statusText: res.statusText,
+        to: input.to,
+        from,
+        body: bodyText.slice(0, 2000),
+        errorName: parsed.name,
+        errorMessage: parsed.message,
+      });
+      throw new Error(`E-Mail konnte nicht gesendet werden (${res.status}): ${parsed.message || bodyText.slice(0, 200)}`);
+    }
+
+    console.info("[email] Resend ok", { to: input.to, id: parsed.id, from });
+    return { ok: true, mode: "resend", id: parsed.id };
+  } catch (e) {
+    console.error("[email] send exception", {
+      to: input.to,
+      from,
+      subject: input.subject,
+      error: e instanceof Error ? { name: e.name, message: e.message, stack: e.stack?.split("\n").slice(0, 8) } : String(e),
+    });
+    throw e;
+  }
 }
 
 export function appBaseUrl(): string {
@@ -45,6 +90,14 @@ export function appBaseUrl(): string {
   if (explicit) return explicit.replace(/\/$/, "");
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
   return "http://localhost:3000";
+}
+
+/** Platform-Admin-Inbox für neue Registrierungen */
+export function platformAdminNotifyEmail(): string {
+  return (
+    process.env.PLATFORM_ADMIN_EMAIL?.trim()
+    || "noah.alsamawi@gmail.com"
+  );
 }
 
 function escapeHtml(s: string) {

@@ -111,32 +111,32 @@ async function notifyPlatformAdminsOfRegistration(reg: {
   email: string;
   companyName: string;
 }) {
-  const { appBaseUrl, sendEmail } = await import("@/infrastructure/email/send");
-  const admins = await db.query.users.findMany({
-    where: eq(users.role, "SUPER_ADMIN"),
-    columns: { email: true, name: true },
-  });
-  if (!admins.length) return;
-
+  const { appBaseUrl, platformAdminNotifyEmail, sendEmail } = await import("@/infrastructure/email/send");
+  const to = platformAdminNotifyEmail();
   const reviewUrl = `${appBaseUrl()}/super/tenants`;
   const text = [
     "Neue Superuser-Registrierung (PENDING)",
     "",
     `Firma: ${reg.companyName}`,
     `E-Mail: ${reg.email}`,
+    `Tenant-ID: ${reg.tenantId}`,
     "",
     `Freigeben unter: ${reviewUrl}`,
   ].join("\n");
 
-  await Promise.allSettled(
-    admins.map((a) =>
-      sendEmail({
-        to: a.email,
-        subject: `Neue Registrierung: ${reg.companyName}`,
-        text,
-      }).catch((e) => {
-        console.error("[email] admin registration notify failed", a.email, e);
-      }),
-    ),
-  );
+  console.info("[email] registration notify →", to);
+  try {
+    const result = await sendEmail({
+      to,
+      subject: `Neue Registrierung: ${reg.companyName}`,
+      text,
+    });
+    console.info("[email] registration notify done", result);
+  } catch (e) {
+    console.error("[email] registration notify failed", {
+      to,
+      companyName: reg.companyName,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
