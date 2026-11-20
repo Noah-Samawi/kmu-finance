@@ -10,6 +10,7 @@ export async function requireUser(...roles: Role[]): Promise<AuthUser> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const user = await resolveSession(token);
   if (!user) redirect("/login");
+  if (user.role !== "SUPER_ADMIN" && user.tenantStatus === "PENDING") redirect("/pending");
   if (roles.length && !expandRoles(roles).includes(user.role)) redirect(homeFor(user.role));
   return user;
 }

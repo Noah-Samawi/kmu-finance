@@ -8,7 +8,7 @@ import { LanguageSwitcher } from "@/components/i18n";
 
 export const dynamic = "force-dynamic";
 
-const NAV: readonly { href: string; label: MsgKey; badgeKey?: "receipts" }[] = [
+const NAV: readonly { href: string; label: MsgKey; badgeKey?: "receipts"; ownerOnly?: boolean }[] = [
   { href: "/admin/dashboard", label: "nav.dashboard" },
   { href: "/admin/invoices", label: "nav.invoices" },
   { href: "/admin/contacts", label: "nav.contacts" },
@@ -20,6 +20,7 @@ const NAV: readonly { href: string; label: MsgKey; badgeKey?: "receipts" }[] = [
   { href: "/admin/briefkopf", label: "nav.letterhead" },
   { href: "/admin/receipts", label: "nav.receipts", badgeKey: "receipts" },
   { href: "/admin/reports", label: "nav.reports" },
+  { href: "/admin/security", label: "nav.security", ownerOnly: true },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -27,6 +28,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const t = await getT();
   const pending = (await listReceipts(user, { status: "SUBMITTED" })).length;
   const badge = (k?: string) => (k === "receipts" ? pending : undefined);
+  const isOwner = user.role === "TENANT_OWNER" || user.role === "ADMIN";
+  const nav = NAV.filter((n) => !n.ownerOnly || isOwner);
 
   return (
     <div className="md:flex">
@@ -40,7 +43,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </div>
         </div>
         <nav className="flex flex-col gap-0.5">
-          {NAV.map((n) => <NavLink key={n.href} href={n.href} badge={badge(n.badgeKey)}>{t(n.label)}</NavLink>)}
+          {nav.map((n) => <NavLink key={n.href} href={n.href} badge={badge(n.badgeKey)}>{t(n.label)}</NavLink>)}
         </nav>
         <div className="mt-auto flex items-center justify-between gap-2 px-3">
           <LogoutButton />
@@ -61,7 +64,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </div>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none]">
-          {NAV.map((n) => <NavLink key={n.href} href={n.href} variant="top" badge={badge(n.badgeKey)}>{t(n.label)}</NavLink>)}
+          {nav.map((n) => <NavLink key={n.href} href={n.href} variant="top" badge={badge(n.badgeKey)}>{t(n.label)}</NavLink>)}
         </nav>
       </header>
 

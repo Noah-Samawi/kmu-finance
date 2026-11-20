@@ -31,6 +31,9 @@ export function route<P extends Params = Params>(
       if (roles !== "public") {
         const user = await resolveSession(req.cookies.get(SESSION_COOKIE)?.value);
         if (!user) throw unauthorized();
+        if (user.role !== "SUPER_ADMIN" && user.tenantStatus === "PENDING") {
+          throw forbidden("Konto wartet noch auf Freigabe");
+        }
         if (!expandRoles(roles).includes(user.role)) throw forbidden();
         ctx = user;
       }

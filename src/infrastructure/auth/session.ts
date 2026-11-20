@@ -14,6 +14,8 @@ export interface AuthUser {
   name: string;
   email: string;
   tenantName: string | null;
+  /** ACTIVE | PENDING | SUSPENDED | BLOCKED | null (SUPER_ADMIN) */
+  tenantStatus: string | null;
   /** Company-Scope für COMPANY_ADMIN / EMPLOYEE; null = alle Companies (TENANT_OWNER) */
   companyId: string | null;
   canEnterCashExpense: boolean;
@@ -59,8 +61,10 @@ export async function resolveSession(token: string | undefined | null): Promise<
     .limit(1);
   const r = rows[0];
   if (!r || !r.isActive || r.canLogin === false) return null;
-  // PENDING / BLOCKED / SUSPENDED → keine Session (Cascade-Sperre für alle User des Tenants)
-  if (r.role !== "SUPER_ADMIN" && r.tenantStatus && r.tenantStatus !== "ACTIVE") return null;
+  // BLOCKED / SUSPENDED → keine Session. PENDING darf nur die Warteseite sehen.
+  if (r.role !== "SUPER_ADMIN" && r.tenantStatus && r.tenantStatus !== "ACTIVE" && r.tenantStatus !== "PENDING") {
+    return null;
+  }
 
   let companyId: string | null = null;
   if (r.tenantId && (r.role === "COMPANY_ADMIN" || r.role === "EMPLOYEE" || r.role === "PARTNER")) {
@@ -77,7 +81,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
 
   return {
     userId: r.userId, tenantId: r.tenantId, role: r.role, name: r.name,
-    email: r.email, tenantName: r.tenantName, companyId,
+    email: r.email, tenantName: r.tenantName, tenantStatus: r.tenantStatus ?? null, companyId,
     canEnterCashExpense: r.canEnterCashExpense,
     canEnterOutlay: r.canEnterOutlay, canViewReports: r.canViewReports, canViewBank: r.canViewBank,
   };

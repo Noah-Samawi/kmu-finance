@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { adminDashboard } from "@/application/dashboard";
 import { ButtonLink, Empty, Money, PageHeader, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { formatCents } from "@/domain/money";
 import { zoned } from "@/domain/period";
+import { db } from "@/infrastructure/db/client";
+import { users } from "@/infrastructure/db/schema";
 
 export const metadata: Metadata = { title: "Übersicht" };
 
@@ -13,6 +16,13 @@ export default async function DashboardPage() {
   const user = await requireUser("ADMIN");
   const d = await adminDashboard(user);
   const monthName = zoned(new Date()).toLocaleDateString("de-DE", { month: "long" });
+  const isOwner = user.role === "TENANT_OWNER" || user.role === "ADMIN";
+  const totp = isOwner
+    ? await db.query.users.findFirst({
+        where: eq(users.id, user.userId),
+        columns: { totpEnabled: true },
+      })
+    : null;
 
   return (
     <>
@@ -23,6 +33,15 @@ export default async function DashboardPage() {
           <ButtonLink href="/admin/cash">Kasse &amp; Bank</ButtonLink>
         </>}
       />
+
+      {isOwner && !totp?.totpEnabled && (
+        <div className="mb-5 rounded-xl border border-line bg-paper px-4 py-3 text-sm">
+          <span className="text-muted">Tipp: Schütze dein Konto mit Zwei-Faktor-Authentifizierung. </span>
+          <Link href="/admin/security" className="font-medium underline-offset-2 hover:underline">
+            Jetzt unter Sicherheit einrichten
+          </Link>
+        </div>
+      )}
 
       {/* Kassengleichung: das Herzstück der Übersicht */}
       <div className="mb-3 grid gap-3 sm:grid-cols-2">

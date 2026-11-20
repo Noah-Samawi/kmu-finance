@@ -98,13 +98,44 @@ export async function createTenant(ctx: Ctx, input: z.infer<typeof tenantCreateS
 /** Stammdaten ändern oder sperren/entsperren. Sperre wirkt sofort (Session-Check). */
 export async function updateTenant(ctx: Ctx, id: string, input: z.infer<typeof tenantUpdateSchema>) {
   requireRole(ctx, "SUPER_ADMIN");
+  const before = await db.query.tenants.findFirst({ where: eq(tenants.id, id), columns: { status: true } });
+  if (!before) throw notFound("Mandant");
   const [t] = await db.update(tenants).set(input).where(eq(tenants.id, id)).returning();
   if (!t) throw notFound("Mandant");
   await db.insert(auditLogs).values({
     tenantId: id, actorId: ctx.userId, action: input.status ? `tenant.${input.status.toLowerCase()}` : "tenant.updated",
     entity: "Tenant", entityId: id, meta: input,
   });
+  if (before.status !== "ACTIVE" && t.status === "ACTIVE") {
+    await notifyTenantApproved(t.id, t.name);
+  }
   return t;
+}
+
+async function notifyTenantApproved(tenantId: string, tenantName: string) {
+  const { appBaseUrl, sendEmail } = await import("@/infrastructure/email/send");
+  const owner = await db.query.users.findFirst({
+    where: and(eq(users.tenantId, tenantId), inArray(users.role, ["TENANT_OWNER", "ADMIN"])),
+    orderBy: asc(users.createdAt),
+  });
+  if (!owner) return;
+  const loginUrl = `${appBaseUrl()}/login`;
+  try {
+    await sendEmail({
+      to: owner.email,
+      subject: "Konto freigegeben – Kassenbuch",
+      text: [
+        `Hallo ${owner.name},`,
+        "",
+        `Dein Firmenkonto „${tenantName}“ wurde freigegeben.`,
+        `Du kannst dich jetzt anmelden: ${loginUrl}`,
+        "",
+        "Nach dem Login gelangst du zum Dashboard.",
+      ].join("\n"),
+    });
+  } catch (e) {
+    console.error("[email] approval notify failed", e);
+  }
 }
 
 // Ohne leicht verwechselbare Zeichen (0/O, 1/l/I)
