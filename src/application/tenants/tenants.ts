@@ -107,9 +107,56 @@ export async function updateTenant(ctx: Ctx, id: string, input: z.infer<typeof t
     entity: "Tenant", entityId: id, meta: input,
   });
   if (before.status !== "ACTIVE" && t.status === "ACTIVE") {
+    await activateTenantOwners(t.id);
     await notifyTenantApproved(t.id, t.name);
   }
   return t;
+}
+
+/**
+ * Explizite Freigabe: Tenant → ACTIVE, Owner → isActive/canLogin.
+ * Dedizierte Route /approve (ohne volles Update-Schema).
+ */
+export async function approveTenant(ctx: Ctx, id: string) {
+  requireRole(ctx, "SUPER_ADMIN");
+  const before = await db.query.tenants.findFirst({ where: eq(tenants.id, id) });
+  if (!before) throw notFound("Mandant");
+  if (before.status === "ACTIVE") {
+    await activateTenantOwners(id);
+    return { tenant: before, alreadyActive: true as const };
+  }
+
+  const [t] = await db.update(tenants)
+    .set({ status: "ACTIVE" })
+    .where(eq(tenants.id, id))
+    .returning();
+  if (!t) throw notFound("Mandant");
+
+  const owners = await activateTenantOwners(id);
+
+  await db.insert(auditLogs).values({
+    tenantId: id,
+    actorId: ctx.userId,
+    action: "tenant.active",
+    entity: "Tenant",
+    entityId: id,
+    meta: { from: before.status, to: "ACTIVE", ownersActivated: owners },
+  });
+
+  await notifyTenantApproved(t.id, t.name);
+  console.info("[tenant] approved", { tenantId: id, name: t.name, owners });
+  return { tenant: t, alreadyActive: false as const, ownersActivated: owners };
+}
+
+async function activateTenantOwners(tenantId: string) {
+  const updated = await db.update(users).set({
+    isActive: true,
+    canLogin: true,
+  }).where(and(
+    eq(users.tenantId, tenantId),
+    inArray(users.role, ["TENANT_OWNER", "ADMIN"]),
+  )).returning({ id: users.id, email: users.email });
+  return updated.length;
 }
 
 async function notifyTenantApproved(tenantId: string, tenantName: string) {

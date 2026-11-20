@@ -121,7 +121,7 @@ export function TenantActions({ t }: { t: TenantRow }) {
             {t.status === "PENDING" && (
               <MenuItem onClick={() => {
                 setMenu(null);
-                call("PATCH", `/api/v1/super/tenants/${t.id}`, { status: "ACTIVE" });
+                call("POST", `/api/v1/super/tenants/${t.id}/approve`, {});
               }}>Freigeben</MenuItem>
             )}
             <MenuItem onClick={() => {

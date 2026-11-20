@@ -87,9 +87,17 @@ export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; m
   }
 }
 
+/** Kanonische Production-URL (E-Mail-Links; APP_URL oft falsch/Preview) */
+export const PRODUCTION_APP_URL = "https://kmu-finance-eosin.vercel.app";
+
 export function appBaseUrl(): string {
-  const explicit = process.env.APP_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (explicit) return explicit.replace(/\/$/, "");
+  const explicit = (process.env.APP_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim() || "").replace(/\/$/, "");
+  // Nur akzeptieren, wenn es wirklich die Production-Domain ist
+  if (explicit.includes("kmu-finance-eosin.vercel.app")) return explicit.startsWith("http") ? explicit : `https://${explicit}`;
+  // Auf Vercel Production immer kanonische Domain (nicht Preview-URL aus VERCEL_URL)
+  if (process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production") {
+    return PRODUCTION_APP_URL;
+  }
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
   return "http://localhost:3000";
 }
