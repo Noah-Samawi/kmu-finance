@@ -242,13 +242,13 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     }
     if (booking) {
       await tx.insert(partnerBookings).values({
-        tenantId, partnerId: booking.partnerId, kind: booking.kind, source: booking.source, amountCents: newAmount,
+        tenantId, companyId: booking.companyId ?? repl.companyId, partnerId: booking.partnerId, kind: booking.kind, source: booking.source, amountCents: newAmount,
         purpose: purpose.trim(), receiptKey: booking.receiptKey, receiptMime: booking.receiptMime, receiptName: booking.receiptName,
         bookingDate: booking.bookingDate, ledgerEntryId: repl.id, createdById: booking.createdById,
       });
     }
     const [c] = await tx.insert(ledgerCorrections).values({
-      tenantId, kind: "EDIT", originalId: orig.id, reversalId: rev.id, replacementId: repl.id,
+      tenantId, companyId: repl.companyId, kind: "EDIT", originalId: orig.id, reversalId: rev.id, replacementId: repl.id,
       previousAmountCents: oldAmount, previousDescription: orig.description, reason: input.reason, createdById: ctx.userId,
     }).returning();
     await audit(tx, ctx, "ledger.edited", "LedgerEntry", orig.id, {

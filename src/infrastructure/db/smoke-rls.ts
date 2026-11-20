@@ -63,7 +63,32 @@ async function main() {
     const users = await client.query(`SELECT count(*)::int AS n FROM "User"`);
     console.log(`users lesbar (keine RLS auf User): ${users.rows[0].n}`);
 
-    console.log("✓ Phase-0-Smoke OK – RLS aktiv für App-Verbindung");
+    // Company-Scope innerhalb Tenant-Transaktion (Company hat RLS)
+    if (tenants.rowCount && tenants.rowCount > 0) {
+      const tid = (tenants.rows as { id: string; name: string }[]).find((t) => t.name.includes("Wiesbaden"))
+        ?? (tenants.rows as { id: string; name: string }[])[0];
+      await client.query("BEGIN");
+      await client.query(
+        `SELECT set_config('app.tenant_id', $1, true), set_config('app.role', 'TENANT_OWNER', true), set_config('app.company_id', '', true)`,
+        [tid.id],
+      );
+      const cos = await client.query(`SELECT id, name FROM "Company"`);
+      const nullCo = await client.query(`SELECT count(*)::int AS n FROM "LedgerEntry" WHERE "companyId" IS NULL`);
+      console.log(`companies in ${tid.name}: ${cos.rowCount}; ledger ohne companyId: ${nullCo.rows[0].n}`);
+      if (nullCo.rows[0].n !== 0) {
+        await client.query("ROLLBACK");
+        throw new Error(`FAIL: LedgerEntry ohne companyId: ${nullCo.rows[0].n}`);
+      }
+      if (cos.rowCount && cos.rowCount > 0) {
+        const c = cos.rows[0] as { id: string; name: string };
+        await client.query(`SELECT set_config('app.role', 'COMPANY_ADMIN', true), set_config('app.company_id', $1, true)`, [c.id]);
+        const scoped = await client.query(`SELECT count(*)::int AS n FROM "LedgerEntry"`);
+        console.log(`company-scope ${c.name}: ledger=${scoped.rows[0].n}`);
+      }
+      await client.query("ROLLBACK");
+    }
+
+    console.log("✓ Smoke OK – RLS + Company-Scope aktiv");
   } finally {
     client.release();
     await pool.end();

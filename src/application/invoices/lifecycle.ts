@@ -150,7 +150,7 @@ export async function cancelInvoice(ctx: Ctx, id: string, reason: string) {
       paymentMethod: inv.paymentMethod,
     });
     const [storno] = await tx.insert(invoices).values({
-      tenantId, contactId: inv.contactId, number, status: "CANCELED", issueDate,
+      tenantId, companyId: inv.companyId, contactId: inv.contactId, number, status: "CANCELED", issueDate,
       serviceDate: inv.serviceDate, recipientSnapshot: snapshot, notes, pdfKey,
       netCents: -inv.netCents, vatCents: -inv.vatCents, grossCents: -inv.grossCents,
       cancelsInvoiceId: inv.id,

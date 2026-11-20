@@ -83,8 +83,10 @@ export async function createDraft(ctx: Ctx, input: z.infer<typeof invoiceDraftSc
   return withTenant(ctx, async (tx) => {
     await assertContact(tx, tenantId, input.contactId);
     const t = await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+    const { defaultCompanyId } = await import("../companies/resolve-company");
+    const companyId = await defaultCompanyId(tx, tenantId);
     const [inv] = await tx.insert(invoices).values({
-      tenantId, contactId: input.contactId, notes: input.notes,
+      tenantId, companyId, contactId: input.contactId, notes: input.notes,
       paymentMethod: input.paymentMethod ?? t?.defaultPaymentMethod ?? "TRANSFER",
       serviceDate: input.serviceDate ? dateInputToDate(input.serviceDate) : null,
       dueDate: input.dueDate ? dateInputToDate(input.dueDate) : null,

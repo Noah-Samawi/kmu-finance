@@ -1,5 +1,6 @@
-// Legt den Super-Admin an (idempotent). Optional: Demo-Mandant mit
-// Admin und Mitarbeiter, wenn SEED_DEMO=1 gesetzt ist.
+// Legt den Platform-Admin (SUPER_ADMIN) an – nur via Env, kein Hardcode in Prod.
+// Optional: Demo-Tenant mit Company + TENANT_OWNER, wenn SEED_DEMO=1.
+import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
 import { Pool } from "pg";
@@ -23,9 +24,9 @@ async function main() {
       email, name: "System-Inhaber", role: "SUPER_ADMIN",
       passwordHash: await bcrypt.hash(password, 12),
     });
-    console.log(`✓ Super-Admin angelegt: ${email}`);
+    console.log(`✓ Platform-Admin angelegt: ${email}`);
   } else {
-    console.log(`• Super-Admin existiert bereits: ${email}`);
+    console.log(`• Platform-Admin existiert bereits: ${email}`);
   }
 
   if (process.env.SEED_DEMO === "1") {
@@ -37,11 +38,26 @@ async function main() {
         taxNumber: "045 123 45678", vatId: "DE123456789",
         iban: "DE02120300000000202051", bic: "BYLADEM1001",
       }).returning();
+      const companyId = randomUUID();
+      await db.insert(s.companies).values({
+        id: companyId, tenantId: t.id, name: t.name, slug: t.slug,
+        legalName: t.legalName, street: t.street, zip: t.zip, city: t.city,
+      });
+      const ownerId = randomUUID();
+      const empId = randomUUID();
       await db.insert(s.users).values([
-        { tenantId: t.id, email: "chef@demo.local", name: "Clara Chef", role: "ADMIN",
-          passwordHash: await bcrypt.hash("Chef123!", 12) },
-        { tenantId: t.id, email: "fahrer@demo.local", name: "Max Fahrer", role: "EMPLOYEE",
-          passwordHash: await bcrypt.hash("Fahrer123!", 12) },
+        {
+          id: ownerId, tenantId: t.id, email: "chef@demo.local", name: "Clara Chef", role: "TENANT_OWNER",
+          passwordHash: await bcrypt.hash("Chef123!", 12),
+        },
+        {
+          id: empId, tenantId: t.id, email: "fahrer@demo.local", name: "Max Fahrer", role: "EMPLOYEE",
+          passwordHash: await bcrypt.hash("Fahrer123!", 12),
+        },
+      ]);
+      await db.insert(s.memberships).values([
+        { id: randomUUID(), tenantId: t.id, userId: ownerId, companyId: null, role: "TENANT_OWNER" },
+        { id: randomUUID(), tenantId: t.id, userId: empId, companyId, role: "EMPLOYEE" },
       ]);
       console.log("✓ Demo-Mandant: chef@demo.local / Chef123!  ·  fahrer@demo.local / Fahrer123!");
     }

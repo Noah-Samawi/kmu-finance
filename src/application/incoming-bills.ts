@@ -143,8 +143,10 @@ export async function recordIncomingBill(ctx: Ctx, input: z.infer<typeof incomin
       ledgerEntryId = entry.id;
     }
 
+    const { resolveCompanyId } = await import("./companies/resolve-company");
+    const companyId = await resolveCompanyId(tx, tenantId, branchId);
     const [row] = await tx.insert(incomingBills).values({
-      tenantId, supplier: input.supplier, amountCents: input.amountCents, paidCents, payKind, fund,
+      tenantId, companyId, supplier: input.supplier, amountCents: input.amountCents, paidCents, payKind, fund,
       category: input.category, purpose, bookingDate, branchId,
       fileKey: stored.key, fileMime: stored.mime, fileName: stored.name, fileSha256: sha,
       ledgerEntryId, createdById: ctx.userId,

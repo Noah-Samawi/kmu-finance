@@ -107,8 +107,10 @@ export async function submitReceipt(
       }
 
       const branchId = await assertBranch(tx, tenantId, input.branchId);
+      const { resolveCompanyId } = await import("../companies/resolve-company");
+      const companyId = await resolveCompanyId(tx, tenantId, branchId);
       const [r] = await tx.insert(receipts).values({
-        tenantId, employeeId: ctx.userId, amountCents: input.amountCents, vatRate: input.vatRate ?? null, branchId,
+        tenantId, companyId, employeeId: ctx.userId, amountCents: input.amountCents, vatRate: input.vatRate ?? null, branchId,
         merchant: input.merchant, description: input.description,
         receiptDate: dateInputToDate(input.receiptDate),
         fileKey, fileMime: mime, fileSha256: sha,

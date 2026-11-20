@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { withTenant, lockTenantLedger } from "@/infrastructure/db/tenant-tx";
-import { employeeProfiles, hrDocuments, ledgerEntries, users } from "@/infrastructure/db/schema";
+import { employeeProfiles, hrDocuments, ledgerEntries, memberships, users } from "@/infrastructure/db/schema";
 import { destroyAllSessionsOfUser, hashPassword } from "@/infrastructure/auth/session";
 import { conflict, notFound, rule } from "@/domain/errors";
 import { ACCOUNT_LABEL } from "@/domain/accounts";
@@ -84,6 +84,11 @@ export async function createEmployee(ctx: Ctx, input: z.infer<typeof employeeCre
     }).returning(publicCols);
 
     const branchId = input.branchId ? await assertBranch(tx, tenantId, input.branchId) : null;
+    const { resolveCompanyId } = await import("../companies/resolve-company");
+    const companyId = await resolveCompanyId(tx, tenantId, branchId);
+    await tx.insert(memberships).values({
+      id: randomUUID(), tenantId, userId: u.id, companyId, branchId, role: "EMPLOYEE",
+    });
     const noteParts = [
       input.phone ? `Telefon: ${input.phone}` : null,
       branchId ? `Filiale-ID: ${branchId}` : null,
@@ -93,7 +98,7 @@ export async function createEmployee(ctx: Ctx, input: z.infer<typeof employeeCre
       || noteParts.length);
     if (hasProfile) {
       await tx.insert(employeeProfiles).values({
-        tenantId, userId: u.id,
+        tenantId, companyId, userId: u.id,
         street: input.street, zip: input.zip, city: input.city,
         taxId: input.taxId, socialSecurityNumber: input.socialSecurityNumber,
         iban: input.iban, jobTitle: input.jobTitle,
@@ -103,7 +108,7 @@ export async function createEmployee(ctx: Ctx, input: z.infer<typeof employeeCre
         notes: noteParts.length ? noteParts.join("\n") : null,
       });
     }
-    await audit(tx, ctx, "employee.created", "User", u.id, { withLogin, branchId });
+    await audit(tx, ctx, "employee.created", "User", u.id, { withLogin, branchId, companyId });
     return u;
   });
 }

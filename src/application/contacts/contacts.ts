@@ -48,7 +48,9 @@ export async function createContact(ctx: Ctx, input: z.infer<typeof contactSchem
   requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);
   return withTenant(ctx, async (tx) => {
-    const [c] = await tx.insert(contacts).values({ ...input, tenantId }).returning();
+    const { defaultCompanyId } = await import("../companies/resolve-company");
+    const companyId = await defaultCompanyId(tx, tenantId);
+    const [c] = await tx.insert(contacts).values({ ...input, tenantId, companyId }).returning();
     await audit(tx, ctx, "contact.created", "Contact", c.id);
     return c;
   });

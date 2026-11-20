@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
-import { users } from "@/infrastructure/db/schema";
+import { memberships, users } from "@/infrastructure/db/schema";
 import { destroyAllSessionsOfUser, hashPassword } from "@/infrastructure/auth/session";
 import { conflict } from "@/domain/errors";
+import { isAdminLike } from "@/domain/roles";
 import { partnerCreateSchema, partnerUpdateSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
 import {
@@ -45,7 +47,7 @@ export async function getPartner(ctx: Ctx, partnerId: string) {
   else requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);
   return withTenant(ctx, async (tx) => {
-    const p = ctx.role === "ADMIN"
+    const p = isAdminLike(ctx.role)
       ? await loadPartner(tx, tenantId, partnerId, { requireActive: false })
       : (await tx.query.users.findFirst({ where: eq(users.id, ctx.userId) }))!;
     return {
@@ -73,7 +75,12 @@ export async function createPartner(ctx: Ctx, input: z.infer<typeof partnerCreat
       canViewReports: input.canViewReports, canViewBank: input.canViewBank,
       canEnterCashExpense: false, canEnterOutlay: false,
     }).returning(publicCols);
-    await audit(tx, ctx, "partner.created", "User", u.id);
+    const { defaultCompanyId } = await import("../companies/resolve-company");
+    const companyId = await defaultCompanyId(tx, tenantId);
+    await tx.insert(memberships).values({
+      id: randomUUID(), tenantId, userId: u.id, companyId, role: "PARTNER",
+    });
+    await audit(tx, ctx, "partner.created", "User", u.id, { companyId });
     return u;
   });
 }

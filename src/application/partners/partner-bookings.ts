@@ -182,8 +182,10 @@ async function book(tx: Tx, ctx: Ctx, tenantId: string, partnerId: string, input
     type, ...deltas, employeeId: partnerId, bookingDate, category, branchId,
     description: partnerEntryDescription(input.kind, source, category, input.purpose),
   });
+  const { defaultCompanyId } = await import("../companies/resolve-company");
+  const companyId = await defaultCompanyId(tx, tenantId);
   const [b] = await tx.insert(partnerBookings).values({
-    tenantId, partnerId, kind: input.kind, source, amountCents: input.amountCents, purpose: input.purpose.trim(),
+    tenantId, companyId, partnerId, kind: input.kind, source, amountCents: input.amountCents, purpose: input.purpose.trim(),
     receiptKey: input.receipt?.key ?? null, receiptMime: input.receipt?.mime ?? null, receiptName: input.receipt?.name ?? null,
     bookingDate, ledgerEntryId: entry.id, createdById: ctx.userId,
   }).returning();

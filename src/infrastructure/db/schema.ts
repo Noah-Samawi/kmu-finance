@@ -178,7 +178,7 @@ export const companies = pgTable("Company", {
 export const branches = pgTable("Branch", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   name: text("name").notNull(),
   city: text("city"),
   isActive: boolean("isActive").notNull().default(true),
@@ -207,7 +207,7 @@ export const memberships = pgTable("Membership", {
 export const contacts = pgTable("Contact", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   type: contactTypeEnum("type").notNull().default("CUSTOMER"),
   name: text("name").notNull(),
   email: text("email"),
@@ -233,7 +233,7 @@ export const invoiceSequences = pgTable("InvoiceSequence", {
 export const invoices = pgTable("Invoice", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   contactId: text("contactId").notNull().references(() => contacts.id),
   number: text("number"), // "RE-2026-0001", erst bei DRAFT -> OPEN
   status: invoiceStatusEnum("status").notNull().default("DRAFT"),
@@ -276,7 +276,7 @@ export const invoiceItems = pgTable("InvoiceItem", {
 export const receipts = pgTable("Receipt", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   employeeId: text("employeeId").notNull().references(() => users.id),
   amountCents: integer("amountCents").notNull(),
   vatRate: integer("vatRate"),
@@ -321,7 +321,7 @@ export const periodClosings = pgTable("PeriodClosing", {
 export const ledgerEntries = pgTable("LedgerEntry", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   type: ledgerTypeEnum("type").notNull(),
   poolDeltaCents: integer("poolDeltaCents").notNull().default(0),
   cashDeltaCents: integer("cashDeltaCents").notNull().default(0),
@@ -404,7 +404,7 @@ export const ledgerCorrections = pgTable("LedgerCorrection", {
 export const incomingBills = pgTable("IncomingBill", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   supplier: text("supplier").notNull(),
   amountCents: integer("amountCents").notNull(),
   paidCents: integer("paidCents").notNull().default(0),
@@ -435,7 +435,7 @@ export const incomingBills = pgTable("IncomingBill", {
 export const partnerBookings = pgTable("PartnerBooking", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   partnerId: text("partnerId").notNull().references(() => users.id),
   kind: partnerBookingKindEnum("kind").notNull(),
   source: fundingSourceEnum("source"),
@@ -553,7 +553,7 @@ export const payslips = pgTable("Payslip", {
 export const bankStatements = pgTable("BankStatement", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   periodMonth: text("periodMonth").notNull(),
   fileName: text("fileName").notNull(),
   fileMime: text("fileMime").notNull(),
@@ -573,7 +573,7 @@ export const bankStatements = pgTable("BankStatement", {
 export const bankTransactions = pgTable("BankTransaction", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
-  companyId: text("companyId").references(() => companies.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
   statementId: text("statementId").notNull().references(() => bankStatements.id, { onDelete: "cascade" }),
   bookingDate: timestamp("bookingDate", { withTimezone: true }).notNull(),
   amountCents: integer("amountCents").notNull(),

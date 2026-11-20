@@ -3,6 +3,9 @@
 Multi-Tenant-SaaS für kleine Betriebe (Bäckerei, Catering, Gastro).
 Next.js 15 · TypeScript · PostgreSQL 16 · Drizzle ORM · Tailwind 4.
 
+**Hierarchie:** Platform Admin → Tenant (Superuser) → Company → Branch → Fachdaten.  
+App-DB-User `kmu_app` (ohne BYPASSRLS); Migrationen als Owner.
+
 ## Schnellstart (lokal)
 
 ```bash

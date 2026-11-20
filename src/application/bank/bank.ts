@@ -245,8 +245,10 @@ export async function uploadBankStatement(
     const used = new Set<string>();
 
     const fileKey = toReceiptDataUrl(file.mime || "text/plain", file.data);
+    const { resolveCompanyId } = await import("../companies/resolve-company");
+    const companyId = await resolveCompanyId(tx, tenantId, branchId);
     const [st] = await tx.insert(bankStatements).values({
-      tenantId, periodMonth, fileName: file.name, fileMime: file.mime || "text/plain",
+      tenantId, companyId, periodMonth, fileName: file.name, fileMime: file.mime || "text/plain",
       fileKey, fileSha256: sha,
       openingCents: opts.openingCents ?? parsed.openingCents,
       closingCents: opts.closingCents ?? parsed.closingCents,
@@ -285,7 +287,7 @@ export async function uploadBankStatement(
       }
       counts[status]++;
       await tx.insert(bankTransactions).values({
-        tenantId, statementId: st.id, bookingDate,
+        tenantId, companyId, statementId: st.id, bookingDate,
         amountCents: line.amountCents,
         payee: line.payee || null, purpose: line.purpose || null, iban: line.iban || null,
         status, matchedInvoiceId: m.invoiceId ?? null, matchedReceiptId: m.receiptId ?? null,
