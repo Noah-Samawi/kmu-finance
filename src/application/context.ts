@@ -1,11 +1,12 @@
 import type { AuthUser } from "@/infrastructure/auth/session";
 import { forbidden } from "@/domain/errors";
 import type { Role } from "@/infrastructure/db/schema";
+import { expandRoles } from "@/domain/roles";
 
 export type Ctx = AuthUser;
 
 export function requireRole(ctx: Ctx, ...roles: Role[]) {
-  if (!roles.includes(ctx.role)) throw forbidden();
+  if (!expandRoles(roles).includes(ctx.role)) throw forbidden();
 }
 
 /** Mandanten-ID des angemeldeten Benutzers (wirft bei Super-Admin ohne Mandant) */

@@ -57,7 +57,8 @@ export async function resolveSession(token: string | undefined | null): Promise<
     .limit(1);
   const r = rows[0];
   if (!r || !r.isActive || r.canLogin === false) return null;
-  if (r.role !== "SUPER_ADMIN" && r.tenantStatus !== "ACTIVE") return null;
+  // PENDING / BLOCKED / SUSPENDED → keine Session (Cascade-Sperre für alle User des Tenants)
+  if (r.role !== "SUPER_ADMIN" && r.tenantStatus && r.tenantStatus !== "ACTIVE") return null;
   return {
     userId: r.userId, tenantId: r.tenantId, role: r.role, name: r.name,
     email: r.email, tenantName: r.tenantName, canEnterCashExpense: r.canEnterCashExpense,

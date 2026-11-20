@@ -29,7 +29,10 @@ export async function login(email: string, password: string) {
   if (r.user.canLogin === false) {
     throw new AppError(403, "NO_LOGIN", "Für diesen Mitarbeiter ist kein Login eingerichtet. Bitte wende dich an die Geschäftsführung.");
   }
-  if (r.user.role !== "SUPER_ADMIN" && r.tenantStatus !== "ACTIVE") {
+  if (r.user.role !== "SUPER_ADMIN" && r.tenantStatus && r.tenantStatus !== "ACTIVE") {
+    if (r.tenantStatus === "PENDING") {
+      throw new AppError(403, "TENANT_PENDING", "Dein Konto wartet noch auf Freigabe durch die Systemverwaltung.");
+    }
     throw new AppError(403, "TENANT_SUSPENDED", "Dieses Firmenkonto ist gesperrt. Bitte wenden Sie sich an die Systemverwaltung.");
   }
   resetLogin(key);

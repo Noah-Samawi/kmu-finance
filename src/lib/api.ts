@@ -3,6 +3,7 @@ import { ZodError, type ZodTypeAny, type z } from "zod";
 import { isAppError, badRequest, forbidden, unauthorized } from "@/domain/errors";
 import { resolveSession, SESSION_COOKIE, type AuthUser } from "@/infrastructure/auth/session";
 import type { Role } from "@/infrastructure/db/schema";
+import { expandRoles } from "@/domain/roles";
 
 type Params = Record<string, string>;
 
@@ -30,7 +31,7 @@ export function route<P extends Params = Params>(
       if (roles !== "public") {
         const user = await resolveSession(req.cookies.get(SESSION_COOKIE)?.value);
         if (!user) throw unauthorized();
-        if (!roles.includes(user.role)) throw forbidden();
+        if (!expandRoles(roles).includes(user.role)) throw forbidden();
         ctx = user;
       }
       const result = await handler({ req, ctx, params });

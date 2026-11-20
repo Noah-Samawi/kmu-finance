@@ -22,8 +22,15 @@ const updatedAt = () =>
 // ---------------------------------------------------------------------
 // ENUMS
 // ---------------------------------------------------------------------
-export const roleEnum = pgEnum("Role", ["SUPER_ADMIN", "ADMIN", "EMPLOYEE", "PARTNER"]);
-export const tenantStatusEnum = pgEnum("TenantStatus", ["ACTIVE", "SUSPENDED"]);
+export const roleEnum = pgEnum("Role", [
+  "SUPER_ADMIN",
+  "ADMIN", // legacy – nach Backfill → TENANT_OWNER
+  "TENANT_OWNER",
+  "COMPANY_ADMIN",
+  "EMPLOYEE",
+  "PARTNER",
+]);
+export const tenantStatusEnum = pgEnum("TenantStatus", ["ACTIVE", "SUSPENDED", "PENDING", "BLOCKED"]);
 export const contactTypeEnum = pgEnum("ContactType", ["CUSTOMER", "SUPPLIER", "BOTH"]);
 // "Überfällig" wird NICHT gespeichert: OPEN && dueDate < heute
 export const invoiceStatusEnum = pgEnum("InvoiceStatus", ["DRAFT", "OPEN", "PAID", "CANCELED"]);
@@ -107,6 +114,10 @@ export const users = pgTable("User", {
   canViewBank: boolean("canViewBank").notNull().default(false),
   /** false = kein Login (z. B. Küchenhilfe nur für Lohn/Personalakte) */
   canLogin: boolean("canLogin").notNull().default(true),
+  /** TOTP-Geheimnis (Base32); nur gesetzt wenn 2FA eingerichtet */
+  totpSecret: text("totpSecret"),
+  totpEnabled: boolean("totpEnabled").notNull().default(false),
+  totpVerifiedAt: timestamp("totpVerifiedAt", { withTimezone: true }),
   lastLoginAt: timestamp("lastLoginAt", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -120,15 +131,75 @@ export const sessions = pgTable("Session", {
   createdAt: createdAt(),
 }, (t) => [index("Session_user_idx").on(t.userId)]);
 
+export const passwordResetTokens = pgTable("PasswordResetToken", {
+  id: id(),
+  userId: text("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("tokenHash").notNull().unique(),
+  expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+  usedAt: timestamp("usedAt", { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [index("PasswordResetToken_user_idx").on(t.userId)]);
+
+/** Rechtliche Firma unter einem Tenant-Konto (Briefkopf, Steuernummern, …) */
+export const companies = pgTable("Company", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  name: text("name").notNull(),
+  slug: text("slug").notNull(),
+  isActive: boolean("isActive").notNull().default(true),
+  legalName: text("legalName").notNull(),
+  street: text("street").notNull(),
+  zip: text("zip").notNull(),
+  city: text("city").notNull(),
+  country: text("country").notNull().default("DE"),
+  taxNumber: text("taxNumber"),
+  vatId: text("vatId"),
+  iban: text("iban"),
+  bic: text("bic"),
+  smallBusiness: boolean("smallBusiness").notNull().default(false),
+  invoicePrefix: text("invoicePrefix").notNull().default("RE"),
+  defaultPaymentDays: integer("defaultPaymentDays").notNull().default(14),
+  logoKey: text("logoKey"),
+  invoiceFooter: text("invoiceFooter"),
+  defaultPaymentMethod: paymentMethodEnum("defaultPaymentMethod").notNull().default("TRANSFER"),
+  bankName: text("bankName"),
+  invoiceEmail: text("invoiceEmail"),
+  website: text("website"),
+  invoiceTagline: text("invoiceTagline"),
+  ownerName: text("ownerName"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("Company_tenant_slug_key").on(t.tenantId, t.slug),
+  index("Company_tenant_idx").on(t.tenantId),
+]);
+
 // Filialen / Standorte einer Firma (Konten laufen zentral, Auswertung je Filiale)
 export const branches = pgTable("Branch", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   name: text("name").notNull(),
   city: text("city"),
   isActive: boolean("isActive").notNull().default(true),
   createdAt: createdAt(),
 });
+
+/** Zuordnung User ↔ Tenant/Company/Branch */
+export const memberships = pgTable("Membership", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  userId: text("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  companyId: text("companyId").references(() => companies.id, { onDelete: "cascade" }),
+  branchId: text("branchId").references(() => branches.id, { onDelete: "set null" }),
+  role: roleEnum("role").notNull(),
+  isActive: boolean("isActive").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index("Membership_tenant_user_idx").on(t.tenantId, t.userId),
+  index("Membership_company_idx").on(t.companyId),
+]);
 
 // ---------------------------------------------------------------------
 // MODUL A: KUNDEN & RECHNUNGEN
@@ -136,6 +207,7 @@ export const branches = pgTable("Branch", {
 export const contacts = pgTable("Contact", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   type: contactTypeEnum("type").notNull().default("CUSTOMER"),
   name: text("name").notNull(),
   email: text("email"),
@@ -153,6 +225,7 @@ export const contacts = pgTable("Contact", {
 // Fortlaufende Nummer je Mandant und Jahr (atomar per UPSERT ... RETURNING)
 export const invoiceSequences = pgTable("InvoiceSequence", {
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   year: integer("year").notNull(),
   next: integer("next").notNull().default(1),
 }, (t) => [primaryKey({ columns: [t.tenantId, t.year] })]);
@@ -160,6 +233,7 @@ export const invoiceSequences = pgTable("InvoiceSequence", {
 export const invoices = pgTable("Invoice", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   contactId: text("contactId").notNull().references(() => contacts.id),
   number: text("number"), // "RE-2026-0001", erst bei DRAFT -> OPEN
   status: invoiceStatusEnum("status").notNull().default("DRAFT"),
@@ -202,6 +276,7 @@ export const invoiceItems = pgTable("InvoiceItem", {
 export const receipts = pgTable("Receipt", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   employeeId: text("employeeId").notNull().references(() => users.id),
   amountCents: integer("amountCents").notNull(),
   vatRate: integer("vatRate"),
@@ -229,6 +304,7 @@ export const receipts = pgTable("Receipt", {
 export const periodClosings = pgTable("PeriodClosing", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   periodType: periodTypeEnum("periodType").notNull(),
   periodStart: timestamp("periodStart", { withTimezone: true }).notNull(),
   periodEnd: timestamp("periodEnd", { withTimezone: true }).notNull(),
@@ -245,6 +321,7 @@ export const periodClosings = pgTable("PeriodClosing", {
 export const ledgerEntries = pgTable("LedgerEntry", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   type: ledgerTypeEnum("type").notNull(),
   poolDeltaCents: integer("poolDeltaCents").notNull().default(0),
   cashDeltaCents: integer("cashDeltaCents").notNull().default(0),
@@ -294,6 +371,7 @@ export const ledgerEntries = pgTable("LedgerEntry", {
 export const ledgerAttachments = pgTable("LedgerAttachment", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   ledgerEntryId: text("ledgerEntryId").notNull().unique().references(() => ledgerEntries.id),
   fileKey: text("fileKey").notNull(),
   mime: text("mime").notNull(),
@@ -310,6 +388,7 @@ export const ledgerAttachments = pgTable("LedgerAttachment", {
 export const ledgerCorrections = pgTable("LedgerCorrection", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   kind: text("kind").$type<"REMOVE" | "EDIT">().notNull(),
   originalId: text("originalId").notNull().unique().references(() => ledgerEntries.id),
   reversalId: text("reversalId").notNull().unique().references(() => ledgerEntries.id),
@@ -325,6 +404,7 @@ export const ledgerCorrections = pgTable("LedgerCorrection", {
 export const incomingBills = pgTable("IncomingBill", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   supplier: text("supplier").notNull(),
   amountCents: integer("amountCents").notNull(),
   paidCents: integer("paidCents").notNull().default(0),
@@ -355,6 +435,7 @@ export const incomingBills = pgTable("IncomingBill", {
 export const partnerBookings = pgTable("PartnerBooking", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   partnerId: text("partnerId").notNull().references(() => users.id),
   kind: partnerBookingKindEnum("kind").notNull(),
   source: fundingSourceEnum("source"),
@@ -373,6 +454,7 @@ export const partnerBookings = pgTable("PartnerBooking", {
 export const partnerOutlayRefunds = pgTable("PartnerOutlayRefund", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   outlayBookingId: text("outlayBookingId").notNull().references(() => partnerBookings.id),
   refundBookingId: text("refundBookingId").notNull().references(() => partnerBookings.id),
   amountCents: integer("amountCents").notNull(),
@@ -399,6 +481,7 @@ export const auditLogs = pgTable("AuditLog", {
 export const employeeProfiles = pgTable("EmployeeProfile", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   userId: text("userId").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   dateOfBirth: timestamp("dateOfBirth", { withTimezone: true }),
   nationality: text("nationality"),
@@ -428,6 +511,7 @@ export const employeeProfiles = pgTable("EmployeeProfile", {
 export const hrDocuments = pgTable("HrDocument", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   employeeId: text("employeeId").notNull().references(() => users.id, { onDelete: "cascade" }),
   kind: hrDocKindEnum("kind").notNull().default("OTHER"),
   title: text("title").notNull(),
@@ -441,6 +525,7 @@ export const hrDocuments = pgTable("HrDocument", {
 export const payslips = pgTable("Payslip", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   employeeId: text("employeeId").notNull().references(() => users.id),
   year: integer("year").notNull(),
   month: integer("month").notNull(),
@@ -468,6 +553,7 @@ export const payslips = pgTable("Payslip", {
 export const bankStatements = pgTable("BankStatement", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   periodMonth: text("periodMonth").notNull(),
   fileName: text("fileName").notNull(),
   fileMime: text("fileMime").notNull(),
@@ -487,6 +573,7 @@ export const bankStatements = pgTable("BankStatement", {
 export const bankTransactions = pgTable("BankTransaction", {
   id: id(),
   tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").references(() => companies.id),
   statementId: text("statementId").notNull().references(() => bankStatements.id, { onDelete: "cascade" }),
   bookingDate: timestamp("bookingDate", { withTimezone: true }).notNull(),
   amountCents: integer("amountCents").notNull(),
