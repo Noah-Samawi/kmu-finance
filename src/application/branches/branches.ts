@@ -37,8 +37,10 @@ export async function createBranch(ctx: Ctx, input: z.infer<typeof branchSchema>
   const tenantId = tid(ctx);
   return withTenant(ctx, async (tx) => {
     await assertUniqueName(tx, tenantId, input.name);
-    const [b] = await tx.insert(branches).values({ tenantId, name: input.name, city: input.city }).returning();
-    await audit(tx, ctx, "branch.created", "Branch", b.id, { name: b.name, city: b.city });
+    const { defaultCompanyId } = await import("../companies/resolve-company");
+    const companyId = await defaultCompanyId(tx, tenantId);
+    const [b] = await tx.insert(branches).values({ tenantId, companyId, name: input.name, city: input.city }).returning();
+    await audit(tx, ctx, "branch.created", "Branch", b.id, { name: b.name, city: b.city, companyId });
     return { branch: b };
   });
 }

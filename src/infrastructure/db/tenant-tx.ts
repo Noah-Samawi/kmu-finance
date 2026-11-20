@@ -6,6 +6,8 @@ export interface DbContext {
   userId: string;
   tenantId: string | null;
   role: Role;
+  /** Gesetzt für COMPANY_ADMIN / EMPLOYEE – TENANT_OWNER lässt leer (= alle Companies) */
+  companyId?: string | null;
 }
 
 /**
@@ -16,9 +18,10 @@ export interface DbContext {
 export function withTenant<T>(ctx: DbContext, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`
-      select set_config('app.tenant_id', ${ctx.tenantId ?? ""}, true),
-             set_config('app.user_id',   ${ctx.userId}, true),
-             set_config('app.role',      ${ctx.role}, true)`);
+      select set_config('app.tenant_id',  ${ctx.tenantId ?? ""}, true),
+             set_config('app.user_id',    ${ctx.userId}, true),
+             set_config('app.role',       ${ctx.role}, true),
+             set_config('app.company_id', ${ctx.companyId ?? ""}, true)`);
     return fn(tx);
   });
 }

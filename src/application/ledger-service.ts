@@ -185,6 +185,7 @@ export interface NewEntry {
   category?: string | null;
   batchId?: string | null;
   branchId?: string | null;
+  companyId?: string | null;
   vatRate?: number | null;
   vatCents?: number;
   vatMode?: "GROSS" | "NET" | null;
@@ -196,10 +197,14 @@ export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntr
   await assertPeriodOpen(tx, tenantId, bookingDate);
   const cashDeltaCents = e.cashDeltaCents ?? (e.accountKind === "BANK" ? 0 : e.poolDeltaCents);
   const bankDeltaCents = e.bankDeltaCents ?? (e.accountKind === "BANK" ? e.poolDeltaCents : 0);
+  // Phase 3: companyId immer mitschreiben (Dual-Write)
+  const { resolveCompanyId } = await import("./companies/resolve-company");
+  const companyId = await resolveCompanyId(tx, tenantId, e.branchId, e.companyId);
   const [row] = await tx
     .insert(ledgerEntries)
     .values({
       ...e,
+      companyId,
       cashDeltaCents,
       bankDeltaCents,
       claimDeltaCents: e.claimDeltaCents ?? 0,

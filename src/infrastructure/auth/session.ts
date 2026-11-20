@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, lt } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { db } from "../db/client";
-import { sessions, tenants, users, type Role } from "../db/schema";
+import { memberships, sessions, tenants, users, type Role } from "../db/schema";
 
 export const SESSION_COOKIE = "kmu_session";
 const SESSION_DAYS = Number(process.env.SESSION_DAYS ?? 14);
@@ -14,6 +14,8 @@ export interface AuthUser {
   name: string;
   email: string;
   tenantName: string | null;
+  /** Company-Scope für COMPANY_ADMIN / EMPLOYEE; null = alle Companies (TENANT_OWNER) */
+  companyId: string | null;
   canEnterCashExpense: boolean;
   canEnterOutlay: boolean;
   canViewReports: boolean;
@@ -59,9 +61,24 @@ export async function resolveSession(token: string | undefined | null): Promise<
   if (!r || !r.isActive || r.canLogin === false) return null;
   // PENDING / BLOCKED / SUSPENDED → keine Session (Cascade-Sperre für alle User des Tenants)
   if (r.role !== "SUPER_ADMIN" && r.tenantStatus && r.tenantStatus !== "ACTIVE") return null;
+
+  let companyId: string | null = null;
+  if (r.tenantId && (r.role === "COMPANY_ADMIN" || r.role === "EMPLOYEE" || r.role === "PARTNER")) {
+    const m = await db.query.memberships.findFirst({
+      where: and(
+        eq(memberships.userId, r.userId),
+        eq(memberships.tenantId, r.tenantId),
+        eq(memberships.isActive, true),
+      ),
+      columns: { companyId: true },
+    });
+    companyId = m?.companyId ?? null;
+  }
+
   return {
     userId: r.userId, tenantId: r.tenantId, role: r.role, name: r.name,
-    email: r.email, tenantName: r.tenantName, canEnterCashExpense: r.canEnterCashExpense,
+    email: r.email, tenantName: r.tenantName, companyId,
+    canEnterCashExpense: r.canEnterCashExpense,
     canEnterOutlay: r.canEnterOutlay, canViewReports: r.canViewReports, canViewBank: r.canViewBank,
   };
 }

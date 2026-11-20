@@ -1,10 +1,10 @@
 // Super-Admin: Mandanten (Kunden-Firmen) verwalten
 import { randomInt } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/infrastructure/db/client";
 import { withTenant } from "@/infrastructure/db/tenant-tx";
-import { auditLogs, tenants, users } from "@/infrastructure/db/schema";
+import { auditLogs, companies, memberships, tenants, users } from "@/infrastructure/db/schema";
 import { destroyAllSessionsOfUser, hashPassword } from "@/infrastructure/auth/session";
 import { resetLogin } from "@/infrastructure/auth/rate-limit";
 import { conflict, notFound, rule } from "@/domain/errors";
@@ -12,6 +12,7 @@ import {
   tenantAdminPasswordSchema, tenantCreateSchema, tenantDeleteSchema, tenantUpdateSchema,
 } from "@/lib/validation/schemas";
 import { requireRole, type Ctx } from "../context";
+import { randomUUID } from "node:crypto";
 
 export async function listTenants(ctx: Ctx) {
   requireRole(ctx, "SUPER_ADMIN");
@@ -23,8 +24,8 @@ export async function listTenants(ctx: Ctx) {
       taxNumber: tenants.taxNumber, vatId: tenants.vatId, iban: tenants.iban, bic: tenants.bic,
       smallBusiness: tenants.smallBusiness,
       userCount: sql<number>`(select count(*)::int from "User" u where u."tenantId" = "Tenant"."id")`,
-      adminEmail: sql<string | null>`(select u.email from "User" u where u."tenantId" = "Tenant"."id" and u.role = 'ADMIN' order by u."createdAt" limit 1)`,
-      adminName: sql<string | null>`(select u.name from "User" u where u."tenantId" = "Tenant"."id" and u.role = 'ADMIN' order by u."createdAt" limit 1)`,
+      adminEmail: sql<string | null>`(select u.email from "User" u where u."tenantId" = "Tenant"."id" and u.role in ('TENANT_OWNER','ADMIN') order by u."createdAt" limit 1)`,
+      adminName: sql<string | null>`(select u.name from "User" u where u."tenantId" = "Tenant"."id" and u.role in ('TENANT_OWNER','ADMIN') order by u."createdAt" limit 1)`,
     })
     .from(tenants)
     .orderBy(desc(tenants.createdAt));
@@ -57,13 +58,38 @@ export async function createTenant(ctx: Ctx, input: z.infer<typeof tenantCreateS
       throw conflict("E-Mail ist bereits registriert");
     }
     const [t] = await tx.insert(tenants).values(data).returning();
+    const [company] = await tx.insert(companies).values({
+      id: randomUUID(),
+      tenantId: t.id,
+      name: t.name,
+      slug: t.slug,
+      legalName: t.legalName,
+      street: t.street,
+      zip: t.zip,
+      city: t.city,
+      country: t.country,
+      taxNumber: t.taxNumber,
+      vatId: t.vatId,
+      iban: t.iban,
+      bic: t.bic,
+      smallBusiness: t.smallBusiness,
+      invoicePrefix: t.invoicePrefix,
+      defaultPaymentDays: t.defaultPaymentDays,
+    }).returning();
     const [u] = await tx.insert(users).values({
-      tenantId: t.id, email: admin.email, name: admin.name, role: "ADMIN",
+      tenantId: t.id, email: admin.email, name: admin.name, role: "TENANT_OWNER",
       passwordHash: await hashPassword(admin.password),
     }).returning({ id: users.id });
+    await tx.insert(memberships).values({
+      id: randomUUID(),
+      tenantId: t.id,
+      userId: u.id,
+      companyId: null,
+      role: "TENANT_OWNER",
+    });
     await tx.insert(auditLogs).values({
       tenantId: t.id, actorId: ctx.userId, action: "tenant.created", entity: "Tenant", entityId: t.id,
-      meta: { adminUserId: u.id },
+      meta: { adminUserId: u.id, companyId: company.id },
     });
     return t;
   });
@@ -100,10 +126,10 @@ export async function resetTenantAdminPassword(ctx: Ctx, tenantId: string, input
   const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { id: true } });
   if (!t) throw notFound("Mandant");
   const admin = await db.query.users.findFirst({
-    where: and(eq(users.tenantId, tenantId), eq(users.role, "ADMIN")),
+    where: and(eq(users.tenantId, tenantId), inArray(users.role, ["TENANT_OWNER", "ADMIN"])),
     orderBy: asc(users.createdAt),
   });
-  if (!admin) throw notFound("Admin dieser Firma");
+  if (!admin) throw notFound("Inhaber dieser Firma");
   const password = input.password ?? generatePassword();
   await db.update(users).set({ passwordHash: await hashPassword(password) }).where(eq(users.id, admin.id));
   await destroyAllSessionsOfUser(admin.id);
