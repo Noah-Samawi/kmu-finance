@@ -20,6 +20,7 @@ const NAV: readonly { href: string; label: MsgKey; badgeKey?: "receipts"; ownerO
   { href: "/admin/briefkopf", label: "nav.letterhead" },
   { href: "/admin/receipts", label: "nav.receipts", badgeKey: "receipts" },
   { href: "/admin/reports", label: "nav.reports" },
+  { href: "/admin/settings", label: "nav.settings", ownerOnly: true },
   { href: "/admin/security", label: "nav.security", ownerOnly: true },
 ];
 

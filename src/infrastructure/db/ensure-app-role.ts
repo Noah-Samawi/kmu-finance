@@ -66,18 +66,30 @@ async function main() {
     await client.query(`GRANT USAGE ON SCHEMA public TO kmu_app`);
     await client.query(`GRANT USAGE ON SCHEMA public TO app_user_role`);
     await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user_role`);
+    await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO kmu_app`);
     await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user_role`);
+    await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO kmu_app`);
     await client.query(`
       ALTER DEFAULT PRIVILEGES IN SCHEMA public
         GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user_role
     `);
     await client.query(`
       ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO kmu_app
+    `);
+    await client.query(`
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public
         GRANT USAGE, SELECT ON SEQUENCES TO app_user_role
+    `);
+    await client.query(`
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT USAGE, SELECT ON SEQUENCES TO kmu_app
     `);
 
     await client.query(`REVOKE UPDATE, DELETE ON "LedgerEntry" FROM app_user_role`).catch(() => undefined);
+    await client.query(`REVOKE UPDATE, DELETE ON "LedgerEntry" FROM kmu_app`).catch(() => undefined);
     await client.query(`GRANT UPDATE ("closingId") ON "LedgerEntry" TO app_user_role`).catch(() => undefined);
+    await client.query(`GRANT UPDATE ("closingId") ON "LedgerEntry" TO kmu_app`).catch(() => undefined);
 
     // Neon: Rolle muss verbinden dürfen (meist implizit); explizit schadet nicht
     try {

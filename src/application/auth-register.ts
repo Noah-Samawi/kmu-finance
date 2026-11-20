@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/infrastructure/db/client";
 import { companies, memberships, tenants, users } from "@/infrastructure/db/schema";
@@ -52,6 +52,13 @@ export async function registerSuperuser(input: z.infer<typeof registerSchema>) {
       city: "noch offen",
       country: "DE",
     }).returning();
+
+    // RLS auf Company/Membership braucht app.tenant_id in derselben TX
+    await tx.execute(sql`
+      select set_config('app.tenant_id', ${t.id}, true),
+             set_config('app.user_id', ${"register"}, true),
+             set_config('app.role', ${"TENANT_OWNER"}, true),
+             set_config('app.company_id', ${""}, true)`);
 
     const companyId = randomUUID();
     await tx.insert(companies).values({
