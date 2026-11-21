@@ -100,22 +100,19 @@ export function DuplicateWarning({ account, day }: { account: "CASH" | "BANK"; d
 /**
  * Tageseinnahme: Kasse (Bar) und Bankkonto für ein Datum in einem Schritt –
  * gebucht werden zwei getrennte Einnahmen auf zwei getrennte Konten (nie zusammengerechnet).
+ * Keine Personenzuordnung – Umsatz gehört der Firma, nicht einem Mitarbeiter/Gesellschafter.
  */
-export function DailyIncomeForm({ today, persons, preset, branches }: {
-  today: string; persons: PersonOption[]; preset?: PersonOption | null; branches?: BranchOption[];
+export function DailyIncomeForm({ today, branches }: {
+  today: string; branches?: BranchOption[];
 }) {
   const { call, busy, error, setError } = useApi();
   const [date, setDate] = useState(today);
   const [cash, setCash] = useState("");
   const [bank, setBank] = useState("");
-  const [personId, setPersonId] = useState(preset?.id ?? "");
-  const [partnerRole, setPartnerRole] = useState<"" | "FIRMA" | "PRIVAT">("");
   const [tick, setTick] = useState(0);
   const [done, setDone] = useState<string | null>(null);
   const info = useDayIncomes(date, tick);
   const hasCash = !!cents(cash), hasBank = !!cents(bank);
-  const selected = persons.find((p) => p.id === personId);
-  const isPartner = selected?.role === "PARTNER";
 
   return (
     <form className="space-y-3" onSubmit={async (e) => {
@@ -123,13 +120,11 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
       setDone(null);
       if ((cash && cents(cash) === null) || (bank && cents(bank) === null)) return setError("Ungültiger Betrag");
       if (!hasCash && !hasBank) return setError("Bitte Betrag für Kasse (Bar) und/oder Bankkonto eingeben");
-      if (isPartner && !partnerRole) return setError("Bitte Art der Gesellschafter-Buchung wählen");
       const form = e.currentTarget;
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
       const r = await call<{ cashCents: number; bankCents: number }>("POST", "/api/v1/cash/income", {
         bookingDate: date, cashCents: cash || null, bankCents: bank || null, description: f.description,
-        personId: personId || null, branchId: f.branchId || null,
-        vatRate: f.vatRate, vatMode: f.vatMode, partnerRole: partnerRole || null,
+        branchId: f.branchId || null, vatRate: f.vatRate, vatMode: f.vatMode,
       });
       if (r) {
         setDone([
@@ -137,7 +132,7 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
           r.cashCents ? `Tageseinnahme Kasse (Bar) +${formatCents(r.cashCents)}` : null,
           r.bankCents ? `Tageseinnahme Bankkonto +${formatCents(r.bankCents)}` : null,
         ].filter(Boolean).join(" "));
-        setCash(""); setBank(""); setPartnerRole("");
+        setCash(""); setBank("");
         (form.elements.namedItem("description") as HTMLInputElement).value = "";
         setTick((t) => t + 1);
       }
@@ -157,11 +152,7 @@ export function DailyIncomeForm({ today, persons, preset, branches }: {
       {info && hasBank && <DuplicateWarning account="BANK" day={info.bank} />}
       <VatFields amount={cash || bank || ""} />
       <Field label="Wofür?"><input name="description" required minLength={2} defaultValue="Tageseinnahme" className={inputCls} dir="auto" /></Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <PersonSelect persons={persons} preset={preset} value={personId} onChange={(id) => { setPersonId(id); setPartnerRole(""); }} />
-        <BranchSelect branches={branches} />
-      </div>
-      <PartnerRoleField show={isPartner} value={partnerRole} onChange={setPartnerRole} />
+      <BranchSelect branches={branches} />
       <ErrorNote error={error} />
       {done && <p className="text-sm font-medium text-ledger">{done}</p>}
       <button disabled={busy} className={cx(btn.base, btn.primary, "w-full")}>

@@ -108,7 +108,7 @@ export async function balanceAt(ctx: Ctx, day: string, account: "CASH" | "BANK")
   }));
 }
 
-/** Tageseinnahme Kasse und/oder Bank als eine gemeinsame Bewegung (gemeinsame batchId) */
+/** Tageseinnahme Kasse und/oder Bank als eine gemeinsame Bewegung (gemeinsame batchId) – ohne Personenzuordnung */
 export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyIncomeSchema>) {
   requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);
@@ -118,40 +118,25 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
   const vatRate = input.vatRate ?? 0;
   return withTenant(ctx, async (tx) => {
     await lockTenantLedger(tx, tenantId);
-    const person = input.personId ? await loadPerson(tx, tenantId, input.personId) : null;
-    if (person?.role === "PARTNER" && !input.partnerRole) {
-      throw rule("Gesellschafter gewählt: bitte „Firmenausgabe / Betriebsausgabe“ oder „Privatentnahme / Gewinnanteil“ angeben");
-    }
-    const privat = person?.role === "PARTNER" && input.partnerRole === "PRIVAT";
     const branchId = await assertBranch(tx, tenantId, input.branchId);
     const existing = countOn(await incomesOn(tx, tenantId, input.bookingDate));
     const batchId = parts.length > 1 ? randomUUID() : null;
     const bookingDate = bookingDateFor(input.bookingDate);
     const entries = [];
     for (const p of parts) {
-      if (privat) {
-        // Einlage / Gewinnanteil auf dem Gesellschafter-Kapitalkonto
-        entries.push(await insertEntry(tx, ctx, tenantId, {
-          type: "PARTNER_DEPOSIT", ...deltasFor("PARTNER_DEPOSIT", p.amountCents, p.account),
-          employeeId: person!.id, batchId, bookingDate, branchId, partnerRole: "PRIVAT",
-          description: [input.description || "Einlage / Gewinnanteil", ACCOUNT_LABEL[p.account], `von ${person!.name}`].join(" · "),
-        }));
-        continue;
-      }
       const vat = splitVat(p.amountCents, vatRate, vatMode);
       // Kasse/Bank: Brutto-Zahlungsbetrag; MwSt. getrennt positiv (Einnahmen)
       entries.push(await insertEntry(tx, ctx, tenantId, {
         type: "INCOME_MANUAL", ...deltasFor("INCOME_MANUAL", vat.grossCents, p.account),
-        employeeId: person?.id ?? null, batchId, bookingDate, branchId,
+        batchId, bookingDate, branchId,
         vatRate: vat.vatRate || null, vatCents: vatLedgerSign("INCOME", vat.vatCents), vatMode: vat.vatRate ? vat.mode : null,
-        partnerRole: person?.role === "PARTNER" ? input.partnerRole : null,
-        description: [input.description, ACCOUNT_LABEL[p.account], person && `über ${person.name}`,
+        description: [input.description, ACCOUNT_LABEL[p.account],
           vat.vatCents ? `inkl. ${vat.vatRate / 100} % MwSt.` : null].filter(Boolean).join(" · "),
       }));
     }
     await audit(tx, ctx, "cash.daily-income", "LedgerEntry", entries[0].id, {
       batchId, date: input.bookingDate, cashCents: input.cashCents ?? 0, bankCents: input.bankCents ?? 0,
-      personId: person?.id ?? null, existingCash: existing.CASH, existingBank: existing.BANK, vatRate, vatMode,
+      existingCash: existing.CASH, existingBank: existing.BANK, vatRate, vatMode,
     });
     const booked = (a: "CASH" | "BANK") => {
       const raw = parts.find((p) => p.account === a)?.amountCents ?? 0;

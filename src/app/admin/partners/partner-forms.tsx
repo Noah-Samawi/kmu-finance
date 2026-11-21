@@ -8,7 +8,7 @@ import { centsToPlain, formatCents, parseEuroToCents } from "@/domain/money";
 import { fmtDate } from "@/domain/period";
 import { ADMIN_KINDS, FUNDING_LABEL, PARTNER_KIND_LABEL, allowedSources, isPurchase, type FundingSource } from "@/domain/partner";
 import { BranchSelect, CategoryField, type BranchOption } from "@/components/branch-category";
-import { DailyIncomeForm, ExpenseForm, type PersonOption } from "@/components/cash-forms";
+import { ExpenseForm, type PersonOption } from "@/components/cash-forms";
 
 interface Partner {
   id: string; name: string; isActive: boolean; canViewReports: boolean; canViewBank: boolean;
@@ -19,7 +19,7 @@ export function PartnerForms({ partner, today, cashCents, bankCents, branches }:
   partner?: Partner; today?: string; cashCents?: number; bankCents?: number; branches?: BranchOption[];
 }) {
   const { call, busy, error } = useApi();
-  const [more, setMore] = useState<null | "income" | "expense">(null);
+  const [more, setMore] = useState<null | "expense">(null);
   if (!partner) {
     return (
       <form className="space-y-3" onSubmit={async (e) => {
@@ -46,20 +46,15 @@ export function PartnerForms({ partner, today, cashCents, bankCents, branches }:
       <AdminBookingForm partner={partner} branches={branches} />
       <RefundForm partnerId={partner.id} bookings={partner.bookings} />
       <div className="rounded-lg border border-line p-3">
-        <p className="text-sm font-medium">{`Über Kasse & Bank – ${partner.name} zuordnen`}</p>
+        <p className="text-sm font-medium">{`Ausgabe mit Firmenkasse / -bank – ${partner.name}`}</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          <button type="button" className={cx(btn.base, btn.sm, more === "income" ? btn.primary : btn.secondary)} onClick={() => setMore(more === "income" ? null : "income")}>
-            {`Einnahme über ${partner.name}`}
-          </button>
           <button type="button" className={cx(btn.base, btn.sm, more === "expense" ? btn.primary : btn.secondary)} onClick={() => setMore(more === "expense" ? null : "expense")}>
-            Ausgabe mit Firmenkasse / -bank
+            Ausgabe zuordnen
           </button>
         </div>
-        {more && today && (
+        {more === "expense" && today && (
           <div className="mt-3">
-            {more === "income"
-              ? <DailyIncomeForm today={today} persons={[]} preset={asPerson(partner)} branches={branches} />
-              : <ExpenseForm today={today} persons={[]} preset={asPerson(partner)} balances={{ CASH: cashCents, BANK: bankCents }} branches={branches} />}
+            <ExpenseForm today={today} persons={[]} preset={asPerson(partner)} balances={{ CASH: cashCents, BANK: bankCents }} branches={branches} />
           </div>
         )}
       </div>

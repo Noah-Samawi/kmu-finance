@@ -7,7 +7,7 @@ import { getSummary } from "@/application/reports/reports";
 import { btn, cx, PageHeader, Pill, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
 import { formatCents } from "@/domain/money";
-import { DailyIncomeForm, ExpenseForm } from "@/components/cash-forms";
+import { ExpenseForm } from "@/components/cash-forms";
 import { monthKey, todayKey } from "@/domain/period";
 import { getPersonnelFile } from "@/application/hr/hr";
 import { listBranches } from "@/application/branches/branches";
@@ -78,9 +78,6 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           <Section title={`Ausgabe / Einkauf durch ${emp.name}`}>
             <ExpenseForm today={today} persons={[]} preset={person} funds={["BUDGET", "CASH", "BANK"]}
               balances={{ BUDGET: emp.balanceCents, CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} branches={branches} />
-          </Section>
-          <Section title={`Einnahme über ${emp.name}`}>
-            <DailyIncomeForm today={today} persons={[]} preset={person} branches={branches} />
           </Section>
         </div>
       </div>

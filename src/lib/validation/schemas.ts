@@ -287,17 +287,15 @@ const vatRateField = z.union([z.number(), z.string(), z.null(), z.undefined()]).
 const vatModeField = z.enum(["GROSS", "NET"]).default("GROSS");
 const partnerRoleField = z.enum(["FIRMA", "PRIVAT"]).optional().nullable().transform((v) => v || null);
 
-/** Tageseinnahme: Kasse und/oder Bank in einem Schritt */
+/** Tageseinnahme: Kasse und/oder Bank in einem Schritt (ohne Personenzuordnung) */
 export const dailyIncomeSchema = z.object({
   bookingDate: dateStr,
   cashCents: optionalAmount,
   bankCents: optionalAmount,
   description: z.string().trim().min(2, "Wofür? fehlt").max(300),
-  personId,
   branchId,
   vatRate: vatRateField,
   vatMode: vatModeField,
-  partnerRole: partnerRoleField,
 });
 
 /** Betriebsausgabe (Gastro): Herkunft Kasse/Bank oder Budget einer Person */

@@ -112,7 +112,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
         <Section title="Tageseinnahme erfassen">
-          <DailyIncomeForm today={today} persons={persons} branches={branches} />
+          <DailyIncomeForm today={today} branches={branches} />
         </Section>
         <Section title="Ausgabe erfassen (Wareneinkauf / Betriebskosten)">
           <ExpenseForm today={today} persons={persons} balances={{ CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} branches={branches} />
