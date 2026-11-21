@@ -315,11 +315,16 @@ export const dailyIncomeSchema = z.object({
   vatMode: vatModeField,
 });
 
-/** Betriebsausgabe (Gastro): Herkunft Kasse/Bank oder Budget einer Person */
+/** Betriebsausgabe (Gastro): Herkunft Kasse/Bank oder Budget; zwei MwSt.-Spalten (0–20 %) */
 export const expenseSchema = z.object({
   fund: z.enum(["CASH", "BANK", "BUDGET"], { errorMap: () => ({ message: "Bitte Herkunftskonto wählen" }) }),
   category: expenseCategory,
-  amountCents: positiveAmount,
+  rateAPercent: percent0to20.default(7),
+  rateBPercent: percent0to20.default(19),
+  amountACents: optionalAmount,
+  amountBCents: optionalAmount,
+  /** Legacy: einzelner Betrag + Satz */
+  amountCents: optionalAmount,
   purpose: z.string().trim().min(3, "Wofür? / Begründung fehlt").max(500),
   bookingDate: dateStr.optional(),
   personId,
@@ -327,6 +332,12 @@ export const expenseSchema = z.object({
   vatRate: vatRateField,
   vatMode: vatModeField,
   partnerRole: partnerRoleField,
+}).superRefine((v, ctx) => {
+  const hasDual = (v.amountACents != null && v.amountACents > 0) || (v.amountBCents != null && v.amountBCents > 0);
+  const hasLegacy = v.amountCents != null && v.amountCents > 0;
+  if (!hasDual && !hasLegacy) {
+    ctx.addIssue({ code: "custom", message: "Bitte mindestens einen Betrag eingeben", path: ["amountACents"] });
+  }
 });
 
 /** Buchung löschen (aus allen Ansichten entfernen, Kontostand neu) */

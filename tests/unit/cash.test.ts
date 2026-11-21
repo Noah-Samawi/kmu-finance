@@ -113,6 +113,15 @@ describe("Betriebsausgaben (Gastro)", () => {
     expect(categoryLabel("GETRAENKE")).toBe("Getränke");
     expect(categoryLabel(null)).toBe("Ohne Kategorie");
   });
+
+  it("zwei MwSt.-Spalten: Beträge A/B mit freien Sätzen", () => {
+    const v = expenseSchema.parse({
+      fund: "CASH", category: "WAREN", purpose: "Metro",
+      rateAPercent: 7, rateBPercent: 19, amountACents: "10,00", amountBCents: "20,00",
+    });
+    expect(v).toMatchObject({ amountACents: 1_000, amountBCents: 2_000, rateAPercent: 7, rateBPercent: 19 });
+    expect(() => expenseSchema.parse({ fund: "CASH", category: "WAREN", purpose: "Metro" })).toThrow(/Betrag/);
+  });
 });
 
 describe("Gesellschafter: Einkauf für die Firma", () => {

@@ -24,6 +24,10 @@ export const POST = route(["ADMIN"], async ({ req, ctx }) => {
   const input = expenseSchema.parse({
     fund: form.get("fund") || undefined,
     category: form.get("category") || undefined,
+    rateAPercent: form.get("rateAPercent") || 7,
+    rateBPercent: form.get("rateBPercent") || 19,
+    amountACents: String(form.get("amountA") ?? form.get("amountACents") ?? ""),
+    amountBCents: String(form.get("amountB") ?? form.get("amountBCents") ?? ""),
     amountCents: String(form.get("amount") ?? form.get("amountCents") ?? ""),
     purpose: String(form.get("purpose") ?? ""),
     bookingDate: form.get("bookingDate") || undefined,

@@ -7,7 +7,7 @@ import { EXPENSE_CATEGORIES, FUND_LABEL, type ExpenseFund } from "@/domain/cash"
 import type { ScanResult } from "@/domain/ocr";
 import { ReceiptCapture } from "./receipt-capture";
 import { BranchSelect, CategoryField, type BranchOption } from "./branch-category";
-import { PartnerRoleField, VatFields } from "./vat-fields";
+import { PartnerRoleField } from "./vat-fields";
 import { VatSelect } from "./vat-select";
 import { REASON_MIN_WITHOUT_RECEIPT } from "@/domain/partner";
 import { formatCents, parseEuroToCents } from "@/domain/money";
@@ -251,13 +251,16 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
   const { call, busy, error, setError } = useApi();
   const [fund, setFund] = useState(funds[0]);
   const [file, setFile] = useState<File | null>(null);
-  const [amount, setAmount] = useState("");
+  const [rateABp, setRateABp] = useState(700);
+  const [rateBBp, setRateBBp] = useState(1900);
+  const [amountA, setAmountA] = useState("");
+  const [amountB, setAmountB] = useState("");
+  const [vatMode, setVatMode] = useState<"GROSS" | "NET">("GROSS");
   const [purpose, setPurpose] = useState("");
   const [date, setDate] = useState(today);
   const [category, setCategory] = useState("WAREN");
   const [personId, setPersonId] = useState(preset?.id ?? "");
   const [partnerRole, setPartnerRole] = useState<"" | "FIRMA" | "PRIVAT">("");
-  const [vatRate, setVatRate] = useState(0);
   const autoPurpose = useRef("");
   const started = useRef(false);
   const [ocr, setOcr] = useState<{ busy: boolean; hint: (ScanResult & { text: string }) | null; error: string | null }>(
@@ -268,9 +271,15 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
 
   /** Erkannte Werte direkt eintragen – der Nutzer gleicht nur noch mit dem Foto ab */
   function fill(h: ScanResult) {
-    if (h.amountCents) setAmount(centsToInput(h.amountCents));
     if (h.date && h.date <= today) setDate(h.date);
-    if (h.vatRate) setVatRate(h.vatRate);
+    if (h.amountCents) {
+      const formatted = centsToInput(h.amountCents);
+      if (h.vatRate === rateBBp) setAmountB(formatted);
+      else {
+        if (h.vatRate != null) setRateABp(h.vatRate);
+        setAmountA(formatted);
+      }
+    }
     const cat = h.customCategory ?? h.category;
     if (cat) setCategory(cat);
     const text = h.merchant ? (h.description ? `${h.merchant} – ${h.description}` : `${h.merchant} – Einkauf`) : h.description ?? "";
@@ -319,12 +328,22 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
         return setError(`Ohne Beleg ist eine Begründung Pflicht (mindestens ${REASON_MIN_WITHOUT_RECEIPT} Zeichen)`);
       }
       if (isPartner && !partnerRole) return setError("Bitte Art der Gesellschafter-Buchung wählen");
+      if ([amountA, amountB].some((v) => v && cents(v) === null)) return setError("Ungültiger Betrag");
+      if (!cents(amountA) && !cents(amountB)) return setError("Bitte mindestens einen Betrag eingeben");
       fd.set("fund", fund);
       fd.set("personId", personId);
+      fd.set("rateAPercent", String(rateABp / 100));
+      fd.set("rateBPercent", String(rateBBp / 100));
+      fd.set("amountA", amountA);
+      fd.set("amountB", amountB);
+      fd.set("vatMode", vatMode);
+      fd.delete("amount");
+      fd.delete("vatRate");
       if (partnerRole) fd.set("partnerRole", partnerRole); else fd.delete("partnerRole");
       if (await call("POST", "/api/v1/cash/expenses", fd)) {
-        form.reset(); setFile(null); setAmount(""); setPurpose(""); setDate(today); setCategory("WAREN");
-        setPersonId(preset?.id ?? ""); setPartnerRole(""); setVatRate(0); autoPurpose.current = "";
+        form.reset(); setFile(null); setAmountA(""); setAmountB(""); setPurpose(""); setDate(today); setCategory("WAREN");
+        setRateABp(700); setRateBBp(1900); setVatMode("GROSS");
+        setPersonId(preset?.id ?? ""); setPartnerRole(""); autoPurpose.current = "";
         setOcr({ busy: false, hint: null, error: null });
         onBooked?.();
       }
@@ -368,10 +387,47 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
       </fieldset>
       <div className="grid grid-cols-2 gap-3">
         <CategoryField value={category} onChange={setCategory} />
-        <Field label="Betrag"><input name="amount" value={amount} onChange={(e) => setAmount(e.target.value)} required inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} /></Field>
         <Field label="Datum"><input name="bookingDate" type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
       </div>
-      <VatFields amount={amount} defaultRate={vatRate} key={vatRate} />
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full min-w-[320px] text-sm">
+          <thead>
+            <tr className="border-b border-line bg-paper text-left text-muted">
+              <th className="px-3 py-2 font-medium">Betrag</th>
+              <th className="px-2 py-2 font-medium">
+                <span className="mb-1 block text-xs">MwSt.</span>
+                <VatSelect value={rateABp} onChange={setRateABp} className={cx(inputCls, "min-w-[7rem]")} />
+              </th>
+              <th className="px-2 py-2 font-medium">
+                <span className="mb-1 block text-xs">MwSt.</span>
+                <VatSelect value={rateBBp} onChange={setRateBBp} className={cx(inputCls, "min-w-[7rem]")} />
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="px-3 py-2 align-middle font-medium">Ausgabe</td>
+              <td className="px-2 py-2">
+                <input value={amountA} onChange={(e) => setAmountA(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Betrag Satz A" className={cx(inputCls, "text-right tabular")} />
+              </td>
+              <td className="px-2 py-2">
+                <input value={amountB} onChange={(e) => setAmountB(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Betrag Satz B" className={cx(inputCls, "text-right tabular")} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <Field label="Betragsart">
+        <select value={vatMode} onChange={(e) => setVatMode(e.target.value as "GROSS" | "NET")} className={inputCls}>
+          <option value="GROSS">Brutto inkl. MwSt.</option>
+          <option value="NET">Netto zzgl. MwSt.</option>
+        </select>
+      </Field>
+      <p className="text-xs text-muted">
+        MwSt. je Spalte per Dropdown (0–20 %, Standard 7 / 19). Beide Sätze gleichzeitig möglich.
+      </p>
       <Field label={file ? "Wofür?" : `Wofür? / Begründung (ohne Beleg mind. ${REASON_MIN_WITHOUT_RECEIPT} Zeichen)`}>
         <input name="purpose" value={purpose} onChange={(e) => setPurpose(e.target.value)} required minLength={3} placeholder="z. B. Metro – Fleisch und Gemüse" className={inputCls} dir="auto" />
       </Field>

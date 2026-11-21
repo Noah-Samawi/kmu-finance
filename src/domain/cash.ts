@@ -134,6 +134,41 @@ export function dailyIncomeVatParts(input: {
   return parts;
 }
 
+export type ExpenseVatLine = { amountCents: number; vatRateBp: number };
+
+/**
+ * Betriebsausgabe mit zwei freien MwSt.-Sätzen (0–20 %).
+ * Legacy: einzelner amountCents + vatRateBp.
+ */
+export function expenseVatParts(input: {
+  rateAPercent?: number;
+  rateBPercent?: number;
+  amountACents?: number | null;
+  amountBCents?: number | null;
+  /** @deprecated einzelner Betrag */
+  amountCents?: number | null;
+  vatRateBp?: number | null;
+}): ExpenseVatLine[] {
+  const parts: ExpenseVatLine[] = [];
+  const push = (v: number | null | undefined, vatRateBp: number) => {
+    if (v === undefined || v === null || v === 0) return;
+    if (!Number.isInteger(v) || v < 0) throw rule("Beträge müssen positiv sein");
+    parts.push({ amountCents: v, vatRateBp });
+  };
+  const hasDual = (input.amountACents != null && input.amountACents > 0)
+    || (input.amountBCents != null && input.amountBCents > 0);
+  if (hasDual) {
+    const rateA = assertPercent(input.rateAPercent ?? 7, "Spalte 1");
+    const rateB = assertPercent(input.rateBPercent ?? 19, "Spalte 2");
+    push(input.amountACents, rateA);
+    push(input.amountBCents, rateB);
+  } else {
+    push(input.amountCents, input.vatRateBp ?? 0);
+  }
+  if (!parts.length) throw rule("Bitte mindestens einen Betrag eingeben");
+  return parts;
+}
+
 /** @deprecated – Kompatibilität; nutze dailyIncomeVatParts */
 export function dailyIncomeParts(cashCents?: number | null, bankCents?: number | null): { account: AccountKind; amountCents: number }[] {
   const parts: { account: AccountKind; amountCents: number }[] = [];
