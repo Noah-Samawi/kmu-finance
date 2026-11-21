@@ -97,7 +97,39 @@ export function guessCategory(text: string): ExpenseCategory | null {
   return null;
 }
 
-/** Tageseinnahme: Kasse und/oder Bank – mindestens ein Betrag > 0 */
+export type DailyIncomeVatLine = { account: AccountKind; amountCents: number; vatRateBp: number };
+
+/**
+ * Tageseinnahme mit MwSt.-Spalten (7 % / 19 %, optional 0 %).
+ * Mindestens ein Betrag > 0. Jede Zelle = eigene Hauptbuchzeile.
+ */
+export function dailyIncomeVatParts(input: {
+  cash7Cents?: number | null;
+  cash19Cents?: number | null;
+  cash0Cents?: number | null;
+  bank7Cents?: number | null;
+  bank19Cents?: number | null;
+  bank0Cents?: number | null;
+}): DailyIncomeVatLine[] {
+  const cells: { account: AccountKind; vatRateBp: number; v: number | null | undefined }[] = [
+    { account: "CASH", vatRateBp: 700, v: input.cash7Cents },
+    { account: "CASH", vatRateBp: 1900, v: input.cash19Cents },
+    { account: "CASH", vatRateBp: 0, v: input.cash0Cents },
+    { account: "BANK", vatRateBp: 700, v: input.bank7Cents },
+    { account: "BANK", vatRateBp: 1900, v: input.bank19Cents },
+    { account: "BANK", vatRateBp: 0, v: input.bank0Cents },
+  ];
+  const parts: DailyIncomeVatLine[] = [];
+  for (const c of cells) {
+    if (c.v === undefined || c.v === null || c.v === 0) continue;
+    if (!Number.isInteger(c.v) || c.v < 0) throw rule("Beträge müssen positiv sein");
+    parts.push({ account: c.account, amountCents: c.v, vatRateBp: c.vatRateBp });
+  }
+  if (!parts.length) throw rule("Bitte Beträge für 7 % und/oder 19 % MwSt. (Kasse oder Bank) eingeben");
+  return parts;
+}
+
+/** @deprecated – Kompatibilität; nutze dailyIncomeVatParts */
 export function dailyIncomeParts(cashCents?: number | null, bankCents?: number | null): { account: AccountKind; amountCents: number }[] {
   const parts: { account: AccountKind; amountCents: number }[] = [];
   for (const [account, v] of [["CASH", cashCents], ["BANK", bankCents]] as const) {

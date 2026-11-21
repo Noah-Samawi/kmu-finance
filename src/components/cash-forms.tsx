@@ -98,41 +98,58 @@ export function DuplicateWarning({ account, day }: { account: "CASH" | "BANK"; d
 }
 
 /**
- * Tageseinnahme: Kasse (Bar) und Bankkonto für ein Datum in einem Schritt –
- * gebucht werden zwei getrennte Einnahmen auf zwei getrennte Konten (nie zusammengerechnet).
- * Keine Personenzuordnung – Umsatz gehört der Firma, nicht einem Mitarbeiter/Gesellschafter.
+ * Tageseinnahme: Kasse/Bank × 7 % / 19 % MwSt. gleichzeitig (Brutto-Beträge).
+ * Jede Zelle wird als eigene Buchung mit dem jeweiligen Satz erfasst.
  */
 export function DailyIncomeForm({ today, branches }: {
   today: string; branches?: BranchOption[];
 }) {
   const { call, busy, error, setError } = useApi();
   const [date, setDate] = useState(today);
-  const [cash, setCash] = useState("");
-  const [bank, setBank] = useState("");
+  const [cash7, setCash7] = useState("");
+  const [cash19, setCash19] = useState("");
+  const [bank7, setBank7] = useState("");
+  const [bank19, setBank19] = useState("");
+  const [vatMode, setVatMode] = useState<"GROSS" | "NET">("GROSS");
   const [tick, setTick] = useState(0);
   const [done, setDone] = useState<string | null>(null);
   const info = useDayIncomes(date, tick);
-  const hasCash = !!cents(cash), hasBank = !!cents(bank);
+
+  const values = [cash7, cash19, bank7, bank19];
+  const parsed = values.map(cents);
+  const hasAny = parsed.some((c) => !!c);
+  const hasCash = !!(parsed[0] || parsed[1]);
+  const hasBank = !!(parsed[2] || parsed[3]);
+
+  function resetAmounts() {
+    setCash7(""); setCash19(""); setBank7(""); setBank19("");
+  }
 
   return (
     <form className="space-y-3" onSubmit={async (e) => {
       e.preventDefault();
       setDone(null);
-      if ((cash && cents(cash) === null) || (bank && cents(bank) === null)) return setError("Ungültiger Betrag");
-      if (!hasCash && !hasBank) return setError("Bitte Betrag für Kasse (Bar) und/oder Bankkonto eingeben");
+      if (values.some((v) => v && cents(v) === null)) return setError("Ungültiger Betrag");
+      if (!hasAny) return setError("Bitte Beträge für 7 % und/oder 19 % MwSt. eingeben");
       const form = e.currentTarget;
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
       const r = await call<{ cashCents: number; bankCents: number }>("POST", "/api/v1/cash/income", {
-        bookingDate: date, cashCents: cash || null, bankCents: bank || null, description: f.description,
-        branchId: f.branchId || null, vatRate: f.vatRate, vatMode: f.vatMode,
+        bookingDate: date,
+        cash7Cents: cash7 || null,
+        cash19Cents: cash19 || null,
+        bank7Cents: bank7 || null,
+        bank19Cents: bank19 || null,
+        description: f.description,
+        branchId: f.branchId || null,
+        vatMode,
       });
       if (r) {
         setDone([
           `Gebucht am ${dateLabel(date)}:`,
-          r.cashCents ? `Tageseinnahme Kasse (Bar) +${formatCents(r.cashCents)}` : null,
-          r.bankCents ? `Tageseinnahme Bankkonto +${formatCents(r.bankCents)}` : null,
+          r.cashCents ? `Kasse (Bar) +${formatCents(r.cashCents)}` : null,
+          r.bankCents ? `Bankkonto +${formatCents(r.bankCents)}` : null,
         ].filter(Boolean).join(" "));
-        setCash(""); setBank("");
+        resetAmounts();
         (form.elements.namedItem("description") as HTMLInputElement).value = "";
         setTick((t) => t + 1);
       }
@@ -140,23 +157,68 @@ export function DailyIncomeForm({ today, branches }: {
       <Field label="Datum">
         <input type="date" value={date} max={today} required onChange={(e) => setDate(e.target.value)} className={inputCls} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Tageseinnahme Kasse (Bar)" hint={info?.cash.count ? `Bereits gebucht: ${formatCents(info.cash.cents)}` : undefined}>
-          <input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} />
-        </Field>
-        <Field label="Tageseinnahme Bankkonto" hint={info?.bank.count ? `Bereits gebucht: ${formatCents(info.bank.cents)}` : undefined}>
-          <input value={bank} onChange={(e) => setBank(e.target.value)} inputMode="decimal" placeholder="0,00" className={cx(inputCls, "text-right tabular")} />
-        </Field>
+
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full min-w-[320px] text-sm">
+          <thead>
+            <tr className="border-b border-line bg-paper text-left text-muted">
+              <th className="px-3 py-2 font-medium">Konto</th>
+              <th className="px-3 py-2 font-medium">7 % MwSt.</th>
+              <th className="px-3 py-2 font-medium">19 % MwSt.</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-line">
+              <td className="px-3 py-2 align-middle font-medium">
+                Kasse (Bar)
+                {info?.cash.count ? <span className="mt-0.5 block text-xs font-normal text-muted">bereits {formatCents(info.cash.cents)}</span> : null}
+              </td>
+              <td className="px-2 py-2">
+                <input value={cash7} onChange={(e) => setCash7(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Kasse 7 Prozent" className={cx(inputCls, "text-right tabular")} />
+              </td>
+              <td className="px-2 py-2">
+                <input value={cash19} onChange={(e) => setCash19(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Kasse 19 Prozent" className={cx(inputCls, "text-right tabular")} />
+              </td>
+            </tr>
+            <tr>
+              <td className="px-3 py-2 align-middle font-medium">
+                Bankkonto
+                {info?.bank.count ? <span className="mt-0.5 block text-xs font-normal text-muted">bereits {formatCents(info.bank.cents)}</span> : null}
+              </td>
+              <td className="px-2 py-2">
+                <input value={bank7} onChange={(e) => setBank7(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Bank 7 Prozent" className={cx(inputCls, "text-right tabular")} />
+              </td>
+              <td className="px-2 py-2">
+                <input value={bank19} onChange={(e) => setBank19(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Bank 19 Prozent" className={cx(inputCls, "text-right tabular")} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+
       {info && hasCash && <DuplicateWarning account="CASH" day={info.cash} />}
       {info && hasBank && <DuplicateWarning account="BANK" day={info.bank} />}
-      <VatFields amount={cash || bank || ""} />
+
+      <Field label="Betragsart">
+        <select value={vatMode} onChange={(e) => setVatMode(e.target.value as "GROSS" | "NET")} className={inputCls}>
+          <option value="GROSS">Brutto inkl. MwSt.</option>
+          <option value="NET">Netto zzgl. MwSt.</option>
+        </select>
+      </Field>
+      <p className="text-xs text-muted">
+        7 % und 19 % gleichzeitig möglich. Kasse/Bank buchen den Zahlungsbetrag; die MwSt. wird je Satz getrennt gebucht.
+      </p>
+
       <Field label="Wofür?"><input name="description" required minLength={2} defaultValue="Tageseinnahme" className={inputCls} dir="auto" /></Field>
       <BranchSelect branches={branches} />
       <ErrorNote error={error} />
       {done && <p className="text-sm font-medium text-ledger">{done}</p>}
       <button disabled={busy} className={cx(btn.base, btn.primary, "w-full")}>
-        {hasCash && hasBank ? "Kasse und Bank getrennt buchen" : hasBank ? "Auf Bankkonto buchen" : "In Kasse (Bar) buchen"}
+        {hasCash && hasBank ? "Kasse und Bank buchen" : hasBank ? "Auf Bankkonto buchen" : "In Kasse (Bar) buchen"}
       </button>
     </form>
   );

@@ -13,9 +13,10 @@ import { ACCOUNT_LABEL } from "@/domain/accounts";
 import { deltasFor } from "@/domain/ledger";
 import { assertPurpose } from "@/domain/partner";
 import {
-  FUND_LABEL, categoryLabel, correctionDiff, correctionText, dailyIncomeParts, duplicateWarning, duplicateWarnings, expenseDeltas,
+  FUND_LABEL, categoryLabel, correctionDiff, correctionText, dailyIncomeVatParts, duplicateWarning, duplicateWarnings, expenseDeltas,
 } from "@/domain/cash";
 import { splitVat, vatLedgerSign } from "@/domain/vat-booking";
+import { formatCents } from "@/domain/money";
 import { dateInputToDate, dayRange, todayKey } from "@/domain/period";
 import { balanceCorrectionSchema, dailyIncomeSchema, expenseSchema } from "@/lib/validation/schemas";
 import { requireRole, tid, type Ctx } from "../context";
@@ -108,14 +109,13 @@ export async function balanceAt(ctx: Ctx, day: string, account: "CASH" | "BANK")
   }));
 }
 
-/** Tageseinnahme Kasse und/oder Bank als eine gemeinsame Bewegung (gemeinsame batchId) – ohne Personenzuordnung */
+/** Tageseinnahme: Kasse/Bank × 7%/19% als eigene Zeilen (gemeinsame batchId) */
 export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyIncomeSchema>) {
   requireRole(ctx, "ADMIN");
   const tenantId = tid(ctx);
   assertNotFuture(input.bookingDate);
-  const parts = dailyIncomeParts(input.cashCents, input.bankCents);
+  const parts = dailyIncomeVatParts(input);
   const vatMode = input.vatMode ?? "GROSS";
-  const vatRate = input.vatRate ?? 0;
   return withTenant(ctx, async (tx) => {
     await lockTenantLedger(tx, tenantId);
     const branchId = await assertBranch(tx, tenantId, input.branchId);
@@ -124,28 +124,27 @@ export async function recordDailyIncome(ctx: Ctx, input: z.infer<typeof dailyInc
     const bookingDate = bookingDateFor(input.bookingDate);
     const entries = [];
     for (const p of parts) {
-      const vat = splitVat(p.amountCents, vatRate, vatMode);
-      // Kasse/Bank: Brutto-Zahlungsbetrag; MwSt. getrennt positiv (Einnahmen)
+      const vat = splitVat(p.amountCents, p.vatRateBp, vatMode);
       entries.push(await insertEntry(tx, ctx, tenantId, {
         type: "INCOME_MANUAL", ...deltasFor("INCOME_MANUAL", vat.grossCents, p.account),
         batchId, bookingDate, branchId,
         vatRate: vat.vatRate || null, vatCents: vatLedgerSign("INCOME", vat.vatCents), vatMode: vat.vatRate ? vat.mode : null,
         description: [input.description, ACCOUNT_LABEL[p.account],
-          vat.vatCents ? `inkl. ${vat.vatRate / 100} % MwSt.` : null].filter(Boolean).join(" · "),
+          vat.vatRate ? `${vat.vatRate / 100} % MwSt.` : "ohne MwSt.",
+          vat.vatCents ? `MwSt. ${formatCents(vat.vatCents)}` : null].filter(Boolean).join(" · "),
       }));
     }
+    const cashCents = parts.filter((p) => p.account === "CASH").reduce((s, p) => s + splitVat(p.amountCents, p.vatRateBp, vatMode).grossCents, 0);
+    const bankCents = parts.filter((p) => p.account === "BANK").reduce((s, p) => s + splitVat(p.amountCents, p.vatRateBp, vatMode).grossCents, 0);
     await audit(tx, ctx, "cash.daily-income", "LedgerEntry", entries[0].id, {
-      batchId, date: input.bookingDate, cashCents: input.cashCents ?? 0, bankCents: input.bankCents ?? 0,
-      existingCash: existing.CASH, existingBank: existing.BANK, vatRate, vatMode,
+      batchId, date: input.bookingDate, cashCents, bankCents,
+      lines: parts.map((p) => ({ account: p.account, vatRate: p.vatRateBp, amountCents: p.amountCents })),
+      existingCash: existing.CASH, existingBank: existing.BANK, vatMode,
     });
-    const booked = (a: "CASH" | "BANK") => {
-      const raw = parts.find((p) => p.account === a)?.amountCents ?? 0;
-      return raw ? splitVat(raw, vatRate, vatMode).grossCents : 0;
-    };
     return {
-      entries, batchId, cashCents: booked("CASH"), bankCents: booked("BANK"),
+      entries, batchId, cashCents, bankCents,
       warnings: duplicateWarnings(dateInputToDate(input.bookingDate), existing, {
-        cash: booked("CASH") > 0, bank: booked("BANK") > 0,
+        cash: cashCents > 0, bank: bankCents > 0,
       }),
       cashBalanceCents: await cashBalance(tx, tenantId),
       bankBalanceCents: await bankBalance(tx, tenantId),

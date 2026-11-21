@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  accountFlow, accountFlowLines, categoryLabel, correctionDiff, correctionText, dailyIncomeParts,
+  accountFlow, accountFlowLines, categoryLabel, correctionDiff, correctionText, dailyIncomeParts, dailyIncomeVatParts,
   duplicateWarning, duplicateWarnings, entryLabel, expenseDeltas,
 } from "@/domain/cash";
 import { deltasFor, DIRECTLY_REVERSIBLE } from "@/domain/ledger";
@@ -19,17 +19,22 @@ function row(type: PersonLedgerRow["type"], d: Partial<PersonLedgerRow>, date = 
 }
 
 describe("Kasse & Bank – Tageseinnahme", () => {
-  it("Kasse und Bank werden gemeinsam erfasst", () => {
-    expect(dailyIncomeParts(85_000, 120_000)).toEqual([
-      { account: "CASH", amountCents: 85_000 }, { account: "BANK", amountCents: 120_000 },
+  it("Kasse und Bank × 7%/19% werden als getrennte Zeilen erfasst", () => {
+    expect(dailyIncomeVatParts({ cash7Cents: 85_000, bank19Cents: 120_000 })).toEqual([
+      { account: "CASH", amountCents: 85_000, vatRateBp: 700 },
+      { account: "BANK", amountCents: 120_000, vatRateBp: 1900 },
     ]);
-    expect(dailyIncomeParts(null, 5_000)).toEqual([{ account: "BANK", amountCents: 5_000 }]);
+    expect(dailyIncomeVatParts({ cash7Cents: 10_000, cash19Cents: 20_000 })).toEqual([
+      { account: "CASH", amountCents: 10_000, vatRateBp: 700 },
+      { account: "CASH", amountCents: 20_000, vatRateBp: 1900 },
+    ]);
   });
 
   it("ohne Betrag oder mit negativem Betrag abgelehnt", () => {
+    expect(() => dailyIncomeVatParts({})).toThrow(/7 % und\/oder 19 %/);
+    expect(() => dailyIncomeVatParts({ cash7Cents: 0, cash19Cents: 0 })).toThrow();
+    expect(() => dailyIncomeVatParts({ cash7Cents: -100 })).toThrow(/positiv/);
     expect(() => dailyIncomeParts(null, null)).toThrow(/Kasse \(Bar\) und\/oder Bankkonto/);
-    expect(() => dailyIncomeParts(0, 0)).toThrow();
-    expect(() => dailyIncomeParts(-100, 0)).toThrow(/positiv/);
   });
 
   it("Dubletten-Hinweis je Konto mit Datum", () => {
@@ -60,9 +65,11 @@ describe("Kasse & Bank – Tageseinnahme", () => {
   });
 
   it("Schema: leere Felder sind kein Betrag, Euro-Eingabe wird zu Cent", () => {
-    const v = dailyIncomeSchema.parse({ bookingDate: "2026-10-17", cashCents: "850,50", bankCents: "", description: "Tageseinnahme" });
-    expect(v).toMatchObject({ cashCents: 85_050, bankCents: null, personId: null });
-    expect(() => dailyIncomeSchema.parse({ bookingDate: "2026-10-17", cashCents: "-5", description: "x1" })).toThrow();
+    const v = dailyIncomeSchema.parse({
+      bookingDate: "2026-10-17", cash7Cents: "850,50", cash19Cents: "100", bank7Cents: "", description: "Tageseinnahme",
+    });
+    expect(v).toMatchObject({ cash7Cents: 85_050, cash19Cents: 10_000, bank7Cents: null, vatMode: "GROSS" });
+    expect(() => dailyIncomeSchema.parse({ bookingDate: "2026-10-17", cash7Cents: "-5", description: "x1" })).toThrow();
   });
 });
 
