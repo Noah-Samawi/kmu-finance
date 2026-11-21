@@ -19,21 +19,25 @@ function row(type: PersonLedgerRow["type"], d: Partial<PersonLedgerRow>, date = 
 }
 
 describe("Kasse & Bank – Tageseinnahme", () => {
-  it("Kasse und Bank × 7%/19% werden als getrennte Zeilen erfasst", () => {
-    expect(dailyIncomeVatParts({ cash7Cents: 85_000, bank19Cents: 120_000 })).toEqual([
+  it("Kasse und Bank × freie MwSt.-Sätze als getrennte Zeilen", () => {
+    expect(dailyIncomeVatParts({
+      rateAPercent: 7, rateBPercent: 19, cashACents: 85_000, bankBCents: 120_000,
+    })).toEqual([
       { account: "CASH", amountCents: 85_000, vatRateBp: 700 },
       { account: "BANK", amountCents: 120_000, vatRateBp: 1900 },
     ]);
-    expect(dailyIncomeVatParts({ cash7Cents: 10_000, cash19Cents: 20_000 })).toEqual([
-      { account: "CASH", amountCents: 10_000, vatRateBp: 700 },
-      { account: "CASH", amountCents: 20_000, vatRateBp: 1900 },
+    expect(dailyIncomeVatParts({
+      rateAPercent: 5, rateBPercent: 10, cashACents: 10_000, cashBCents: 20_000,
+    })).toEqual([
+      { account: "CASH", amountCents: 10_000, vatRateBp: 500 },
+      { account: "CASH", amountCents: 20_000, vatRateBp: 1000 },
     ]);
   });
 
   it("ohne Betrag oder mit negativem Betrag abgelehnt", () => {
-    expect(() => dailyIncomeVatParts({})).toThrow(/7 % und\/oder 19 %/);
-    expect(() => dailyIncomeVatParts({ cash7Cents: 0, cash19Cents: 0 })).toThrow();
-    expect(() => dailyIncomeVatParts({ cash7Cents: -100 })).toThrow(/positiv/);
+    expect(() => dailyIncomeVatParts({ rateAPercent: 7, rateBPercent: 19 })).toThrow(/mindestens einen Betrag/);
+    expect(() => dailyIncomeVatParts({ rateAPercent: 7, rateBPercent: 19, cashACents: -100 })).toThrow(/positiv/);
+    expect(() => dailyIncomeVatParts({ rateAPercent: 21, rateBPercent: 19, cashACents: 100 })).toThrow(/0–20/);
     expect(() => dailyIncomeParts(null, null)).toThrow(/Kasse \(Bar\) und\/oder Bankkonto/);
   });
 
@@ -66,10 +70,11 @@ describe("Kasse & Bank – Tageseinnahme", () => {
 
   it("Schema: leere Felder sind kein Betrag, Euro-Eingabe wird zu Cent", () => {
     const v = dailyIncomeSchema.parse({
-      bookingDate: "2026-10-17", cash7Cents: "850,50", cash19Cents: "100", bank7Cents: "", description: "Tageseinnahme",
+      bookingDate: "2026-10-17", rateAPercent: 7, rateBPercent: 19,
+      cashACents: "850,50", cashBCents: "100", bankACents: "", description: "Tageseinnahme",
     });
-    expect(v).toMatchObject({ cash7Cents: 85_050, cash19Cents: 10_000, bank7Cents: null, vatMode: "GROSS" });
-    expect(() => dailyIncomeSchema.parse({ bookingDate: "2026-10-17", cash7Cents: "-5", description: "x1" })).toThrow();
+    expect(v).toMatchObject({ cashACents: 85_050, cashBCents: 10_000, bankACents: null, rateAPercent: 7, vatMode: "GROSS" });
+    expect(() => dailyIncomeSchema.parse({ bookingDate: "2026-10-17", cashACents: "-5", description: "x1" })).toThrow();
   });
 });
 

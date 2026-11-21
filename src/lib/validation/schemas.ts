@@ -287,15 +287,29 @@ const vatRateField = z.union([z.number(), z.string(), z.null(), z.undefined()]).
 const vatModeField = z.enum(["GROSS", "NET"]).default("GROSS");
 const partnerRoleField = z.enum(["FIRMA", "PRIVAT"]).optional().nullable().transform((v) => v || null);
 
-/** Tageseinnahme: Kasse/Bank × 7 % / 19 % (Brutto) gleichzeitig, ohne Personenzuordnung */
+const percent0to20 = z.union([z.number(), z.string()]).transform((v, ctx) => {
+  const n = typeof v === "number" ? v : Number(String(v).replace(",", ".").replace("%", "").trim());
+  if (!Number.isFinite(n)) {
+    ctx.addIssue({ code: "custom", message: "MwSt.-Satz ungültig" });
+    return z.NEVER;
+  }
+  const p = Math.round(n);
+  if (p < 0 || p > 20) {
+    ctx.addIssue({ code: "custom", message: "MwSt.-Satz: 0–20 %" });
+    return z.NEVER;
+  }
+  return p;
+});
+
+/** Tageseinnahme: zwei freie MwSt.-Sätze × Kasse/Bank, ohne Personenzuordnung */
 export const dailyIncomeSchema = z.object({
   bookingDate: dateStr,
-  cash7Cents: optionalAmount,
-  cash19Cents: optionalAmount,
-  cash0Cents: optionalAmount,
-  bank7Cents: optionalAmount,
-  bank19Cents: optionalAmount,
-  bank0Cents: optionalAmount,
+  rateAPercent: percent0to20.default(7),
+  rateBPercent: percent0to20.default(19),
+  cashACents: optionalAmount,
+  cashBCents: optionalAmount,
+  bankACents: optionalAmount,
+  bankBCents: optionalAmount,
   description: z.string().trim().min(2, "Wofür? fehlt").max(300),
   branchId,
   vatMode: vatModeField,

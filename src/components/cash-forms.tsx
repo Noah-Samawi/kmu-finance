@@ -8,6 +8,7 @@ import type { ScanResult } from "@/domain/ocr";
 import { ReceiptCapture } from "./receipt-capture";
 import { BranchSelect, CategoryField, type BranchOption } from "./branch-category";
 import { PartnerRoleField, VatFields } from "./vat-fields";
+import { VatSelect } from "./vat-select";
 import { REASON_MIN_WITHOUT_RECEIPT } from "@/domain/partner";
 import { formatCents, parseEuroToCents } from "@/domain/money";
 import { fmtDate } from "@/domain/period";
@@ -98,31 +99,34 @@ export function DuplicateWarning({ account, day }: { account: "CASH" | "BANK"; d
 }
 
 /**
- * Tageseinnahme: Kasse/Bank × 7 % / 19 % MwSt. gleichzeitig (Brutto-Beträge).
- * Jede Zelle wird als eigene Buchung mit dem jeweiligen Satz erfasst.
+ * Tageseinnahme: zwei MwSt.-Spalten mit langem Dropdown (0–20 %).
+ * Standard 7 / 19 – jeder Satz über VatSelect wählbar.
  */
 export function DailyIncomeForm({ today, branches }: {
   today: string; branches?: BranchOption[];
 }) {
   const { call, busy, error, setError } = useApi();
   const [date, setDate] = useState(today);
-  const [cash7, setCash7] = useState("");
-  const [cash19, setCash19] = useState("");
-  const [bank7, setBank7] = useState("");
-  const [bank19, setBank19] = useState("");
+  /** Basispunkte, wie VatSelect */
+  const [rateABp, setRateABp] = useState(700);
+  const [rateBBp, setRateBBp] = useState(1900);
+  const [cashA, setCashA] = useState("");
+  const [cashB, setCashB] = useState("");
+  const [bankA, setBankA] = useState("");
+  const [bankB, setBankB] = useState("");
   const [vatMode, setVatMode] = useState<"GROSS" | "NET">("GROSS");
   const [tick, setTick] = useState(0);
   const [done, setDone] = useState<string | null>(null);
   const info = useDayIncomes(date, tick);
 
-  const values = [cash7, cash19, bank7, bank19];
+  const values = [cashA, cashB, bankA, bankB];
   const parsed = values.map(cents);
   const hasAny = parsed.some((c) => !!c);
   const hasCash = !!(parsed[0] || parsed[1]);
   const hasBank = !!(parsed[2] || parsed[3]);
 
   function resetAmounts() {
-    setCash7(""); setCash19(""); setBank7(""); setBank19("");
+    setCashA(""); setCashB(""); setBankA(""); setBankB("");
   }
 
   return (
@@ -130,15 +134,17 @@ export function DailyIncomeForm({ today, branches }: {
       e.preventDefault();
       setDone(null);
       if (values.some((v) => v && cents(v) === null)) return setError("Ungültiger Betrag");
-      if (!hasAny) return setError("Bitte Beträge für 7 % und/oder 19 % MwSt. eingeben");
+      if (!hasAny) return setError("Bitte mindestens einen Betrag eingeben");
       const form = e.currentTarget;
       const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
       const r = await call<{ cashCents: number; bankCents: number }>("POST", "/api/v1/cash/income", {
         bookingDate: date,
-        cash7Cents: cash7 || null,
-        cash19Cents: cash19 || null,
-        bank7Cents: bank7 || null,
-        bank19Cents: bank19 || null,
+        rateAPercent: rateABp / 100,
+        rateBPercent: rateBBp / 100,
+        cashACents: cashA || null,
+        cashBCents: cashB || null,
+        bankACents: bankA || null,
+        bankBCents: bankB || null,
         description: f.description,
         branchId: f.branchId || null,
         vatMode,
@@ -159,12 +165,18 @@ export function DailyIncomeForm({ today, branches }: {
       </Field>
 
       <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-[320px] text-sm">
+        <table className="w-full min-w-[360px] text-sm">
           <thead>
             <tr className="border-b border-line bg-paper text-left text-muted">
               <th className="px-3 py-2 font-medium">Konto</th>
-              <th className="px-3 py-2 font-medium">7 % MwSt.</th>
-              <th className="px-3 py-2 font-medium">19 % MwSt.</th>
+              <th className="px-2 py-2 font-medium">
+                <span className="mb-1 block text-xs">MwSt.</span>
+                <VatSelect value={rateABp} onChange={setRateABp} className={cx(inputCls, "min-w-[7rem]")} />
+              </th>
+              <th className="px-2 py-2 font-medium">
+                <span className="mb-1 block text-xs">MwSt.</span>
+                <VatSelect value={rateBBp} onChange={setRateBBp} className={cx(inputCls, "min-w-[7rem]")} />
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -174,12 +186,12 @@ export function DailyIncomeForm({ today, branches }: {
                 {info?.cash.count ? <span className="mt-0.5 block text-xs font-normal text-muted">bereits {formatCents(info.cash.cents)}</span> : null}
               </td>
               <td className="px-2 py-2">
-                <input value={cash7} onChange={(e) => setCash7(e.target.value)} inputMode="decimal" placeholder="0,00"
-                  aria-label="Kasse 7 Prozent" className={cx(inputCls, "text-right tabular")} />
+                <input value={cashA} onChange={(e) => setCashA(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Kasse Satz A" className={cx(inputCls, "text-right tabular")} />
               </td>
               <td className="px-2 py-2">
-                <input value={cash19} onChange={(e) => setCash19(e.target.value)} inputMode="decimal" placeholder="0,00"
-                  aria-label="Kasse 19 Prozent" className={cx(inputCls, "text-right tabular")} />
+                <input value={cashB} onChange={(e) => setCashB(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Kasse Satz B" className={cx(inputCls, "text-right tabular")} />
               </td>
             </tr>
             <tr>
@@ -188,12 +200,12 @@ export function DailyIncomeForm({ today, branches }: {
                 {info?.bank.count ? <span className="mt-0.5 block text-xs font-normal text-muted">bereits {formatCents(info.bank.cents)}</span> : null}
               </td>
               <td className="px-2 py-2">
-                <input value={bank7} onChange={(e) => setBank7(e.target.value)} inputMode="decimal" placeholder="0,00"
-                  aria-label="Bank 7 Prozent" className={cx(inputCls, "text-right tabular")} />
+                <input value={bankA} onChange={(e) => setBankA(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Bank Satz A" className={cx(inputCls, "text-right tabular")} />
               </td>
               <td className="px-2 py-2">
-                <input value={bank19} onChange={(e) => setBank19(e.target.value)} inputMode="decimal" placeholder="0,00"
-                  aria-label="Bank 19 Prozent" className={cx(inputCls, "text-right tabular")} />
+                <input value={bankB} onChange={(e) => setBankB(e.target.value)} inputMode="decimal" placeholder="0,00"
+                  aria-label="Bank Satz B" className={cx(inputCls, "text-right tabular")} />
               </td>
             </tr>
           </tbody>
@@ -210,7 +222,7 @@ export function DailyIncomeForm({ today, branches }: {
         </select>
       </Field>
       <p className="text-xs text-muted">
-        7 % und 19 % gleichzeitig möglich. Kasse/Bank buchen den Zahlungsbetrag; die MwSt. wird je Satz getrennt gebucht.
+        MwSt. je Spalte per Dropdown (0–20 %). Zwei Sätze gleichzeitig – jede Zelle wird getrennt gebucht.
       </p>
 
       <Field label="Wofür?"><input name="description" required minLength={2} defaultValue="Tageseinnahme" className={inputCls} dir="auto" /></Field>

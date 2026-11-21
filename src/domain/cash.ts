@@ -99,25 +99,30 @@ export function guessCategory(text: string): ExpenseCategory | null {
 
 export type DailyIncomeVatLine = { account: AccountKind; amountCents: number; vatRateBp: number };
 
+function assertPercent(p: number, label: string): number {
+  if (!Number.isInteger(p) || p < 0 || p > 20) throw rule(`${label}: MwSt.-Satz 0–20`);
+  return p * 100;
+}
+
 /**
- * Tageseinnahme mit MwSt.-Spalten (7 % / 19 %, optional 0 %).
+ * Tageseinnahme mit zwei freien MwSt.-Sätzen (0–20 %).
  * Mindestens ein Betrag > 0. Jede Zelle = eigene Hauptbuchzeile.
  */
 export function dailyIncomeVatParts(input: {
-  cash7Cents?: number | null;
-  cash19Cents?: number | null;
-  cash0Cents?: number | null;
-  bank7Cents?: number | null;
-  bank19Cents?: number | null;
-  bank0Cents?: number | null;
+  rateAPercent: number;
+  rateBPercent: number;
+  cashACents?: number | null;
+  cashBCents?: number | null;
+  bankACents?: number | null;
+  bankBCents?: number | null;
 }): DailyIncomeVatLine[] {
+  const rateA = assertPercent(input.rateAPercent, "Spalte 1");
+  const rateB = assertPercent(input.rateBPercent, "Spalte 2");
   const cells: { account: AccountKind; vatRateBp: number; v: number | null | undefined }[] = [
-    { account: "CASH", vatRateBp: 700, v: input.cash7Cents },
-    { account: "CASH", vatRateBp: 1900, v: input.cash19Cents },
-    { account: "CASH", vatRateBp: 0, v: input.cash0Cents },
-    { account: "BANK", vatRateBp: 700, v: input.bank7Cents },
-    { account: "BANK", vatRateBp: 1900, v: input.bank19Cents },
-    { account: "BANK", vatRateBp: 0, v: input.bank0Cents },
+    { account: "CASH", vatRateBp: rateA, v: input.cashACents },
+    { account: "CASH", vatRateBp: rateB, v: input.cashBCents },
+    { account: "BANK", vatRateBp: rateA, v: input.bankACents },
+    { account: "BANK", vatRateBp: rateB, v: input.bankBCents },
   ];
   const parts: DailyIncomeVatLine[] = [];
   for (const c of cells) {
@@ -125,7 +130,7 @@ export function dailyIncomeVatParts(input: {
     if (!Number.isInteger(c.v) || c.v < 0) throw rule("Beträge müssen positiv sein");
     parts.push({ account: c.account, amountCents: c.v, vatRateBp: c.vatRateBp });
   }
-  if (!parts.length) throw rule("Bitte Beträge für 7 % und/oder 19 % MwSt. (Kasse oder Bank) eingeben");
+  if (!parts.length) throw rule("Bitte mindestens einen Betrag eingeben");
   return parts;
 }
 
