@@ -25,7 +25,11 @@ export async function totpQrDataUrl(email: string, secretBase32: string): Promis
   return QRCode.toDataURL(totpUri(email, secretBase32), { margin: 1, width: 220 });
 }
 
-export function verifyTotp(secretBase32: string, token: string, window = 1): boolean {
+/**
+ * window: erlaubte Perioden (±30s) um den aktuellen Slot.
+ * Default 3 (±90s) – tolerant gegen Vercel-Cold-Start + Neon-Wake.
+ */
+export function verifyTotp(secretBase32: string, token: string, window = 3): boolean {
   const code = token.replace(/\s/g, "");
   if (!/^\d{6}$/.test(code)) return false;
   const totp = new OTPAuth.TOTP({

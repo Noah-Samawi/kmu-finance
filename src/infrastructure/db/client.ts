@@ -10,15 +10,20 @@ const useSsl =
   !!connectionString &&
   (/neon\.tech/i.test(connectionString) || /sslmode=require/i.test(connectionString));
 
+// Neon: DATABASE_URL sollte den Pooler-Host nutzen (…-pooler.…neon.tech).
+// Auf Vercel Pool klein halten (Serverless); Timeout für Cold-Start/Wake.
 export const pool =
   globalForDb.pgPool ??
   new Pool({
     connectionString,
-    max: 10,
+    max: process.env.VERCEL ? 3 : 10,
+    connectionTimeoutMillis: 15_000,
+    idleTimeoutMillis: 10_000,
     ssl: useSsl ? { rejectUnauthorized: false } : undefined,
   });
 
-if (process.env.NODE_ENV !== "production") globalForDb.pgPool = pool;
+// Pool auch in Production cachen (Vercel Isolates wiederverwenden Connections)
+globalForDb.pgPool = pool;
 
 export const db = drizzle(pool, { schema });
 export type Db = typeof db;
