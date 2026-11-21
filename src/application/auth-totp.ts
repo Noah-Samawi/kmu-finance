@@ -20,14 +20,15 @@ export const totpConfirmSchema = z.object({
   code: z.string().trim().regex(/^\d{6}$/, "6-stelliger Code"),
 });
 
-function assertOwner(ctx: Ctx) {
+function assertTotpEligible(ctx: Ctx) {
+  if (ctx.role === "SUPER_ADMIN") return;
   requireRole(ctx, "ADMIN"); // expandRoles → TENANT_OWNER
   if (ctx.role === "COMPANY_ADMIN") throw rule("2FA nur für den Konto-Inhaber");
 }
 
 /** Setup starten: Secret + QR (noch nicht aktiv) */
 export async function beginTotpEnrollment(ctx: Ctx) {
-  assertOwner(ctx);
+  assertTotpEligible(ctx);
   const u = await db.query.users.findFirst({ where: eq(users.id, ctx.userId) });
   if (!u) throw notFound("Benutzer");
   if (u.totpEnabled) throw rule("2FA ist bereits aktiv – zuerst deaktivieren");
@@ -43,7 +44,7 @@ export async function beginTotpEnrollment(ctx: Ctx) {
 
 /** Setup bestätigen mit erstem Code */
 export async function confirmTotpEnrollment(ctx: Ctx, secret: string, code: string) {
-  assertOwner(ctx);
+  assertTotpEligible(ctx);
   if (!verifyTotp(secret, code)) throw rule("Code ungültig – App-Uhrzeit prüfen");
   await db.update(users).set({
     totpSecret: secret,
@@ -54,7 +55,7 @@ export async function confirmTotpEnrollment(ctx: Ctx, secret: string, code: stri
 }
 
 export async function disableTotp(ctx: Ctx, code: string) {
-  assertOwner(ctx);
+  assertTotpEligible(ctx);
   const u = await db.query.users.findFirst({ where: eq(users.id, ctx.userId) });
   if (!u?.totpEnabled || !u.totpSecret) throw rule("2FA ist nicht aktiv");
   if (!verifyTotp(u.totpSecret, code)) throw rule("Code ungültig");
@@ -67,7 +68,7 @@ export async function disableTotp(ctx: Ctx, code: string) {
 }
 
 export async function totpStatus(ctx: Ctx) {
-  assertOwner(ctx);
+  assertTotpEligible(ctx);
   const u = await db.query.users.findFirst({
     where: eq(users.id, ctx.userId),
     columns: { totpEnabled: true, totpVerifiedAt: true },
@@ -88,7 +89,9 @@ export async function completeTotpLogin(challengeToken: string, code: string) {
     .limit(1);
   const r = rows[0];
   if (!r?.user || !r.user.totpEnabled || !r.user.totpSecret) throw unauthorized("2FA nicht aktiv");
-  if (!(r.user.role === "TENANT_OWNER" || r.user.role === "ADMIN")) throw unauthorized();
+  if (!(r.user.role === "SUPER_ADMIN" || r.user.role === "TENANT_OWNER" || r.user.role === "ADMIN")) {
+    throw unauthorized();
+  }
   if (!verifyTotp(r.user.totpSecret, code)) throw unauthorized("Code ungültig");
 
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, r.user.id));

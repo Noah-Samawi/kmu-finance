@@ -48,9 +48,9 @@ export async function login(email: string, password: string): Promise<LoginResul
     throw new AppError(403, "TENANT_SUSPENDED", "Dieses Firmenkonto ist gesperrt. Bitte wenden Sie sich an die Systemverwaltung.");
   }
 
-  // 2FA nur für Superuser / Tenant-Owner (nicht Restaurant-Mitarbeiter)
+  // 2FA für Platform-Admin + Tenant-Owner (nicht Restaurant-Mitarbeiter)
   const wantsTotp = r.user.totpEnabled && r.user.totpSecret
-    && (r.user.role === "TENANT_OWNER" || r.user.role === "ADMIN");
+    && (r.user.role === "SUPER_ADMIN" || r.user.role === "TENANT_OWNER" || r.user.role === "ADMIN");
   if (wantsTotp) {
     resetLogin(key);
     return {

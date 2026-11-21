@@ -22,11 +22,11 @@ export const resetPasswordSchema = z.object({
 });
 
 function canSelfReset(role: string) {
-  return role === "TENANT_OWNER" || role === "ADMIN";
+  return role === "SUPER_ADMIN" || role === "TENANT_OWNER" || role === "ADMIN";
 }
 
 /**
- * Reset-Link nur für Superuser (TENANT_OWNER / legacy ADMIN).
+ * Reset-Link für Platform-Admin / Tenant-Owner (legacy ADMIN).
  * Antwort immer gleich – kein User-Enumeration.
  */
 export async function requestPasswordReset(email: string) {
