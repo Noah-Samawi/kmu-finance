@@ -11,10 +11,11 @@ import { fmtDate, fmtDateTime, todayKey } from "@/domain/period";
 import { ReviewButtons } from "./review-buttons";
 import { ScanLauncher } from "./scan-launcher";
 import { BelegUpload } from "./beleg-upload";
-import { BelegBoard } from "./beleg-board";
+import { BelegBoard, type BelegCard } from "./beleg-board";
 import { BelegReviewHost } from "./beleg-review-host";
 
 export const metadata: Metadata = { title: "Belege prüfen" };
+export const dynamic = "force-dynamic";
 
 const TABS = [
   { key: "inbox", label: "Posteingang" },
@@ -26,6 +27,23 @@ const TABS = [
 
 type Tab = (typeof TABS)[number]["key"];
 
+function toCards(rows: Awaited<ReturnType<typeof listBelege>>): BelegCard[] {
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    docType: r.docType,
+    branchId: r.branchId,
+    branchName: r.branchName,
+    amountCents: r.amountCents,
+    merchant: r.merchant,
+    bookingDate: r.bookingDate ? new Date(r.bookingDate).toISOString() : null,
+    createdAt: new Date(r.createdAt).toISOString(),
+    fileMime: r.fileMime,
+    ocrStatus: r.ocrStatus,
+    receiptNumber: r.receiptNumber,
+  }));
+}
+
 export default async function ReceiptsPage({ searchParams }: {
   searchParams: Promise<{ tab?: string; status?: string; beleg?: string }>;
 }) {
@@ -36,16 +54,26 @@ export default async function ReceiptsPage({ searchParams }: {
     ?? (sp.status ? "staff" : "inbox");
   const staffStatus = (["SUBMITTED", "APPROVED", "REJECTED"] as const).find((k) => k === sp.status) ?? "SUBMITTED";
 
-  const [inboxCount, belege, staffReceipts, persons, branches, pool] = await Promise.all([
-    countBelegInbox(user),
-    tab === "staff" ? Promise.resolve([]) : listBelege(user, {
-      status: tab === "inbox" ? "INBOX" : tab === "filed" ? "FILED" : tab === "trash" ? "TRASH" : "ALL",
+  const [inboxCount, belegeRaw, staffReceipts, persons, branches, pool] = await Promise.all([
+    countBelegInbox(user).catch((e) => {
+      console.error("[receipts] countBelegInbox", e);
+      return 0;
     }),
+    tab === "staff"
+      ? Promise.resolve([])
+      : listBelege(user, {
+          status: tab === "inbox" ? "INBOX" : tab === "filed" ? "FILED" : tab === "trash" ? "TRASH" : "ALL",
+        }).catch((e) => {
+          console.error("[receipts] listBelege", e);
+          return [];
+        }),
     tab === "staff" ? listReceipts(user, { status: staffStatus }) : Promise.resolve([]),
     listPersons(user),
     listBranches(user),
-    poolOverview(user),
+    tab === "staff" ? poolOverview(user) : Promise.resolve(null),
   ]);
+
+  const belege = toCards(belegeRaw as Awaited<ReturnType<typeof listBelege>>);
 
   return (
     <>
@@ -74,14 +102,14 @@ export default async function ReceiptsPage({ searchParams }: {
       {tab !== "staff" ? (
         <BelegBoard
           tab={tab === "all" ? "all" : tab}
-          rows={belege as Parameters<typeof BelegBoard>[0]["rows"]}
+          rows={belege}
           branches={branches}
           selectedId={sp.beleg}
         />
       ) : (
         <>
           <ScanLauncher today={todayKey()} persons={persons} branches={branches}
-            balances={{ CASH: pool.cashBalanceCents, BANK: pool.bankBalanceCents }} />
+            balances={{ CASH: pool!.cashBalanceCents, BANK: pool!.bankBalanceCents }} />
           <div className="mb-4 flex gap-2">
             {([
               { key: "SUBMITTED", label: "Zu prüfen" },
