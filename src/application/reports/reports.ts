@@ -11,6 +11,7 @@ import { accountFlow, categoryLabel, flowType, type AccountFlow } from "@/domain
 import { filterLedgerRows, type LedgerFilter } from "@/domain/ledger-filter";
 import { conflict, rule } from "@/domain/errors";
 import { dayRange, monthKey, monthRange, todayKey } from "@/domain/period";
+import { isAdminLike } from "@/domain/roles";
 import { requireRole, tid, type Ctx } from "../context";
 import { partnerBookingRows } from "../partners/partner-bookings";
 import {
@@ -351,7 +352,8 @@ export async function listLedger(
   requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   const tenantId = tid(ctx);
   const range = f.from || f.to ? rangeFromDays(f.from ?? "2000-01-01", f.to ?? todayKey()) : undefined;
-  const employeeId = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? f.employeeId : ctx.userId;
+  // TENANT_OWNER / COMPANY_ADMIN = wie ADMIN: alle Buchungen, nicht nur eigene employeeId
+  const employeeId = isAdminLike(ctx.role) || (ctx.role === "PARTNER" && ctx.canViewReports) ? f.employeeId : ctx.userId;
   const rows = await withTenant(ctx, (tx) => ledgerRows(tx, tenantId, { range, employeeId, limit: f.filter ? 20_000 : f.limit ?? 1000 }));
   return f.filter ? filterLedgerRows(rows, f.filter).slice(0, f.limit ?? 1000) : rows;
 }
@@ -360,11 +362,11 @@ export async function getSummary(ctx: Ctx, from: string, to: string, employeeId?
   requireRole(ctx, "ADMIN", "EMPLOYEE", "PARTNER");
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
-  const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
+  const only = isAdminLike(ctx.role) || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
   return withTenant(ctx, async (tx) => ({
     summary: await buildSummary(tx, tenantId, range, from, to, only, branchId),
     entries: await ledgerRows(tx, tenantId, { range, employeeId: only, branchId, limit: 2000 }),
-    partnerBookings: ctx.role === "EMPLOYEE" || (only && ctx.role === "ADMIN")
+    partnerBookings: ctx.role === "EMPLOYEE" || (only && isAdminLike(ctx.role))
       ? []
       : await partnerBookingRows(tx, tenantId, { range, partnerId: only }),
   }));

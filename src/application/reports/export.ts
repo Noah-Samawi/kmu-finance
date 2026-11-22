@@ -14,6 +14,7 @@ import { LEDGER_LABEL } from "@/domain/ledger";
 import { centsToPlain, formatCents } from "@/domain/money";
 import { fmtDate, fmtDateTime } from "@/domain/period";
 import { forbidden } from "@/domain/errors";
+import { isAdminLike } from "@/domain/roles";
 import { requireRole, tid, type Ctx } from "../context";
 import { buildSummary, ledgerRows, rangeFromDays, type LedgerRow, type Summary } from "./reports";
 import { partnerBookingRows, type PartnerBookingRow } from "../partners/partner-bookings";
@@ -202,12 +203,12 @@ export async function exportReport(ctx: Ctx, format: "csv" | "pdf" | "zip", from
   if (format === "zip") return exportAllBranchReports(ctx, from, to);
   const tenantId = tid(ctx);
   const range = rangeFromDays(from, to);
-  const only = ctx.role === "ADMIN" || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
+  const only = isAdminLike(ctx.role) || (ctx.role === "PARTNER" && ctx.canViewReports) ? employeeId : ctx.userId;
   const scoped = !!branchId;
   const { rows, summary, tenantName, partnerBookings, persons } = await withTenant(ctx, async (tx) => ({
     rows: await ledgerRows(tx, tenantId, { range, employeeId: only, branchId, limit: 100_000 }),
     summary: await buildSummary(tx, tenantId, range, from, to, only, branchId),
-    partnerBookings: ctx.role === "EMPLOYEE" || (only && ctx.role === "ADMIN")
+    partnerBookings: ctx.role === "EMPLOYEE" || (only && isAdminLike(ctx.role))
       ? []
       : await partnerBookingRows(tx, tenantId, { range, partnerId: only }),
     persons: scoped || ctx.role === "EMPLOYEE"
