@@ -40,7 +40,7 @@ export interface LedgerRow {
   reversalOfId: string | null; reversedType: LedgerType | null; closingId: string | null;
   category: string | null; batchId: string | null; attachmentId: string | null;
   branchId: string | null; branchName: string | null;
-  vatRate: number | null; vatCents: number; partnerRole: "FIRMA" | "PRIVAT" | null;
+  vatRate: number | null; vatCents: number; partnerRole: "FIRMA" | "PRIVAT" | "GEWINN" | null;
   /** Ersatzbuchung nach "Ändern": vorheriger Betrag / Text */
   editedFromCents: number | null; editedFromDescription: string | null;
 }

@@ -35,10 +35,10 @@ export const FUNDING_LABEL: Record<FundingSource, string> = {
 };
 
 export const PARTNER_KIND_LABEL: Record<PartnerKind, string> = {
-  DEPOSIT: "Einlage",
+  DEPOSIT: "Einlage (Kapital einzahlen)",
   OUTLAY: "Auslage / Ausgabe für die Firma",
-  DRAW: "Entnahme",
-  PROFIT: "Gewinnanteil (ohne Auszahlung)",
+  DRAW: "Kapitalrückzahlung / Entnahme",
+  PROFIT: "Gewinnanteil-Auszahlung",
   BUDGET: "Budget-Zuteilung (Vorschuss)",
   BUDGET_RETURN: "Budget-Rückgabe",
   BUDGET_SETTLED: "Budget verbraucht (abgerechnet)",
@@ -66,11 +66,11 @@ export function allowedSources(kind: PartnerKind): FundingSource[] | null {
     // Privat ausgelegtes Geld ist nie Kapital, sondern immer eine Auslage (Verbindlichkeit der Firma)
     case "DEPOSIT":
     case "DRAW":
+    case "PROFIT":
     case "BUDGET":
     case "BUDGET_RETURN":
     case "OUTLAY_REFUND":
       return ["BANK", "CASH"];
-    case "PROFIT":
     case "BUDGET_SETTLED":
     case "PURCHASE_CAPITAL":
     case "PURCHASE_BUDGET":
@@ -121,9 +121,11 @@ export function partnerPosting(kind: PartnerKind, source: FundingSource | null, 
         ? { type: "PARTNER_OUTLAY", deltas: { ...none, claimDeltaCents: a, accountKind: null } }
         : { type: "PARTNER_EXPENSE", deltas: { ...none, ...account(-a, src!) } };
     case "DRAW":
+      // Kapitalrückzahlung: Kasse/Bank −, Kapitalkonto − (Richtung Null)
       return { type: "PARTNER_DRAW", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: -a } };
     case "PROFIT":
-      return { type: "PARTNER_PROFIT", deltas: { ...none, partnerDeltaCents: a, accountKind: null } };
+      // Gewinnanteil-Auszahlung: Kasse/Bank −, Kapitalkonto + (ihm gutgeschrieben)
+      return { type: "PARTNER_PROFIT", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: a } };
     case "BUDGET":
       return { type: "ALLOCATION", deltas: { ...none, ...account(-a, src!), walletDeltaCents: a } };
     case "BUDGET_RETURN":

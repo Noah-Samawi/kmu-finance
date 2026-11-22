@@ -14,7 +14,7 @@ import { ErrorNote, useApi } from "./use-api";
  */
 export function EntryActions({ id, amountCents, description, branchId, branches, persons, personId, partnerRole, canEdit = true, editHint }: {
   id: string; amountCents: number; description: string; branchId?: string | null; branches?: BranchOption[];
-  persons?: PersonOption[]; personId?: string | null; partnerRole?: "FIRMA" | "PRIVAT" | null;
+  persons?: PersonOption[]; personId?: string | null; partnerRole?: "FIRMA" | "PRIVAT" | "GEWINN" | null;
   canEdit?: boolean; editHint?: string;
 }) {
   const { call, busy, error, setError } = useApi();
@@ -23,7 +23,7 @@ export function EntryActions({ id, amountCents, description, branchId, branches,
   const [text, setText] = useState(description);
   const [branch, setBranch] = useState(branchId ?? "");
   const [person, setPerson] = useState(personId ?? "");
-  const [role, setRole] = useState<"" | "FIRMA" | "PRIVAT">(partnerRole ?? "");
+  const [role, setRole] = useState<"" | "FIRMA" | "PRIVAT" | "GEWINN">(partnerRole ?? "");
   const [reason, setReason] = useState("");
   const selected = persons?.find((p) => p.id === person);
   const isPartner = selected?.role === "PARTNER";

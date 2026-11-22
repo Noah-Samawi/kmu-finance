@@ -55,19 +55,22 @@ export function VatFields({
   );
 }
 
+export type PartnerExpenseRole = "FIRMA" | "PRIVAT" | "GEWINN";
+
 /** Pflichtfeld, sobald ein Gesellschafter gewählt ist */
 export function PartnerRoleField({ show, value, onChange }: {
-  show: boolean; value: "" | "FIRMA" | "PRIVAT"; onChange: (v: "" | "FIRMA" | "PRIVAT") => void;
+  show: boolean; value: "" | PartnerExpenseRole; onChange: (v: "" | PartnerExpenseRole) => void;
 }) {
   if (!show) return null;
   return (
     <fieldset className="rounded-lg border-2 border-ink/20 bg-paper p-3">
       <legend className="px-1 text-sm font-semibold">Art der Gesellschafter-Buchung</legend>
-      <p className="mb-2 text-xs text-muted">Pflicht – die Buchung erscheint auf dem Gesellschafter-Konto.</p>
+      <p className="mb-2 text-xs text-muted">Pflicht – Kasse/Bank wird belastet; die Wirkung auf dem Gesellschafter-Konto hängt von der Art ab.</p>
       <div className="space-y-2">
         {([
-          ["FIRMA", "Firmenausgabe / Betriebsausgabe", "Belastet Kasse/Bank als Betriebsausgabe und wird dem Gesellschafter zugeordnet."],
-          ["PRIVAT", "Auszahlung / Einnahme vom Gewinnanteil (Privatentnahme)", "Belastet Kasse/Bank und das Kapitalkonto des Gesellschafters."],
+          ["FIRMA", "Firmenausgabe / Betriebsausgabe", "Kasse/Bank − als Betriebsausgabe; dem Gesellschafter nur zugeordnet (Kapital unverändert)."],
+          ["GEWINN", "Gewinnanteil-Auszahlung", "Kasse/Bank −; dem Gesellschafter als Gewinnanteil auf dem Kapitalkonto gutgeschrieben (+)."],
+          ["PRIVAT", "Kapitalrückzahlung / Entnahme", "Kasse/Bank − und Kapitalkonto − (z. B. eingelegtes Kapital zurückzahlen, Richtung Null)."],
         ] as const).map(([v, title, hint]) => (
           <label key={v} className={cx(
             "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2",

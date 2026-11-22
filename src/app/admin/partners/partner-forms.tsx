@@ -82,10 +82,10 @@ type AdminKind = (typeof ADMIN_KINDS)[number];
 const asPerson = (p: Partner): PersonOption => ({ id: p.id, name: p.name, role: "PARTNER", isActive: p.isActive });
 
 const KIND_GROUPS: { label: string; kinds: AdminKind[] }[] = [
-  { label: "Einnahmen & Gutschriften", kinds: ["DEPOSIT", "PROFIT", "OUTLAY"] },
+  { label: "Kapital & Gewinnanteil", kinds: ["DEPOSIT", "PROFIT", "DRAW"] },
+  { label: "Auslagen (vorgelegtes Geld)", kinds: ["OUTLAY"] },
   { label: "Ausgaben / Einkäufe für die Firma", kinds: ["PURCHASE_CAPITAL", "PURCHASE_BUDGET"] },
   { label: "Budget / Vorschuss", kinds: ["BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED"] },
-  { label: "Entnahme", kinds: ["DRAW"] },
 ];
 
 function AdminBookingForm({ partner, branches }: { partner: Partner; branches?: BranchOption[] }) {
@@ -142,8 +142,15 @@ function AdminBookingForm({ partner, branches }: { partner: Partner; branches?: 
         </p>
       )}
       <p className="text-xs text-muted sm:col-span-2">
-        Budget-Zuteilungen landen im Konto „Budget / Vorschuss“ und werden nie mit „Vorgelegtes Geld“ verrechnet.
-        Offene Auslagen bitte ausschließlich über „Auslagen-Erstattung“ ausgleichen.
+        {kind === "DEPOSIT" && "Einlage: Geld auf Kasse/Bank der Firma → Kapitalkonto +."}
+        {kind === "PROFIT" && "Gewinnanteil: Kasse/Bank −, Kapitalkonto + (ihm gutgeschrieben)."}
+        {kind === "DRAW" && "Kapitalrückzahlung: Kasse/Bank −, Kapitalkonto − (Richtung Null)."}
+        {kind === "BUDGET" || kind === "BUDGET_RETURN" || kind === "BUDGET_SETTLED"
+          ? "Budget landet in „Budget / Vorschuss“ und wird nie mit „Vorgelegtes Geld“ verrechnet."
+          : null}
+        {kind === "OUTLAY" && "Auslage aus eigener Tasche → Auslagenkonto; Firmenkarte/Kasse → Betriebsausgabe ohne Erstattungsanspruch."}
+        {!["DEPOSIT", "PROFIT", "DRAW", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED", "OUTLAY"].includes(kind)
+          && "Offene Auslagen bitte ausschließlich über „Auslagen-Erstattung“ ausgleichen."}
       </p>
       <ErrorNote error={error} />
       <button disabled={busy} className={cx(btn.base, btn.primary, btn.sm, "sm:col-span-2")}>Buchen</button>

@@ -357,9 +357,10 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   vatMode: text("vatMode").$type<"GROSS" | "NET">(),
   /**
    * Bei Zuordnung zu einem Gesellschafter:
-   * FIRMA = Betriebsausgabe (Partner-Konto nur verknüpft), PRIVAT = Privatentnahme vom Gewinnanteil.
+   * FIRMA = Betriebsausgabe (nur verknüpft), GEWINN = Gewinnanteil-Auszahlung (Kapital +),
+   * PRIVAT = Kapitalrückzahlung / Entnahme (Kapital −).
    */
-  partnerRole: text("partnerRole").$type<"FIRMA" | "PRIVAT">(),
+  partnerRole: text("partnerRole").$type<"FIRMA" | "PRIVAT" | "GEWINN">(),
   createdAt: createdAt(), // KEIN updatedAt: unveränderlich
 }, (t) => [
   index("Ledger_tenant_date_idx").on(t.tenantId, t.bookingDate),

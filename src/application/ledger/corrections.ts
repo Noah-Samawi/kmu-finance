@@ -150,40 +150,48 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     }
     const person = employeeId ? await loadAssignablePerson(tx, tenantId, employeeId) : null;
 
-    let partnerRole: "FIRMA" | "PRIVAT" | null = orig.partnerRole ?? null;
+    let partnerRole: "FIRMA" | "PRIVAT" | "GEWINN" | null = orig.partnerRole ?? null;
     if (input.partnerRole !== undefined) partnerRole = input.partnerRole;
     if (input.personId !== undefined && !input.personId) partnerRole = null;
     if (person?.role === "PARTNER") {
-      if (!partnerRole) throw rule("Gesellschafter gewählt: bitte „Firmenausgabe / Betriebsausgabe“ oder „Privatentnahme / Gewinnanteil“ angeben");
+      if (!partnerRole) throw rule("Gesellschafter gewählt: bitte Firmenausgabe, Gewinnanteil oder Kapitalrückzahlung wählen");
     } else {
       partnerRole = null;
     }
 
     const account: "CASH" | "BANK" = orig.accountKind === "BANK" ? "BANK" : "CASH";
-    const wasPrivat = orig.type === "PARTNER_DRAW" || orig.partnerRole === "PRIVAT";
-    const nowPrivat = person?.role === "PARTNER" && partnerRole === "PRIVAT";
-    const canRetype = orig.type === "EXPENSE" || orig.type === "PARTNER_DRAW";
+    const roleOf = (t: string, r: typeof partnerRole) =>
+      t === "PARTNER_DRAW" || r === "PRIVAT" ? "PRIVAT" as const
+        : t === "PARTNER_PROFIT" || r === "GEWINN" ? "GEWINN" as const
+          : r === "FIRMA" ? "FIRMA" as const : null;
+    const wasRole = roleOf(orig.type, orig.partnerRole ?? null);
+    const nowRole = person?.role === "PARTNER" ? partnerRole : null;
+    const canRetype = orig.type === "EXPENSE" || orig.type === "PARTNER_DRAW" || orig.type === "PARTNER_PROFIT";
 
     let type = orig.type;
     let newD: Deltas = newAmount === oldAmount ? { ...oldD } : rescaleDeltas(oldD, newAmount);
     let category = orig.category;
 
-    if (canRetype && orig.walletDeltaCents === 0) {
-      if (nowPrivat && !wasPrivat) {
+    if (canRetype && orig.walletDeltaCents === 0 && nowRole !== wasRole) {
+      if (nowRole === "PRIVAT") {
         type = "PARTNER_DRAW";
         newD = deltasFor("PARTNER_DRAW", newAmount, account);
         category = null;
-      } else if (!nowPrivat && wasPrivat) {
+      } else if (nowRole === "GEWINN") {
+        type = "PARTNER_PROFIT";
+        newD = deltasFor("PARTNER_PROFIT", newAmount, account);
+        category = null;
+      } else if (nowRole === "FIRMA" || nowRole === null) {
         type = "EXPENSE";
         newD = expenseDeltas(account, newAmount);
         category = orig.category ?? "SONSTIGES";
-      } else if (newAmount !== oldAmount) {
-        newD = type === "PARTNER_DRAW"
-          ? deltasFor("PARTNER_DRAW", newAmount, account)
-          : rescaleDeltas(oldD, newAmount);
       }
-    } else if (canRetype && nowPrivat && orig.walletDeltaCents !== 0) {
-      throw rule("Privatentnahme nicht aus Budget – bitte Kasse oder Bank wählen bzw. neu buchen");
+    } else if (canRetype && newAmount !== oldAmount && orig.walletDeltaCents === 0) {
+      newD = type === "PARTNER_DRAW" ? deltasFor("PARTNER_DRAW", newAmount, account)
+        : type === "PARTNER_PROFIT" ? deltasFor("PARTNER_PROFIT", newAmount, account)
+          : rescaleDeltas(oldD, newAmount);
+    } else if (canRetype && (nowRole === "PRIVAT" || nowRole === "GEWINN") && orig.walletDeltaCents !== 0) {
+      throw rule("Kapitalrückzahlung/Gewinnanteil nicht aus Budget – bitte Kasse oder Bank wählen bzw. neu buchen");
     }
 
     const branchId = input.branchId === undefined ? orig.branchId : await assertBranch(tx, tenantId, input.branchId);
@@ -195,7 +203,7 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     let vatRate = orig.vatRate;
     let vatCents = orig.vatCents ?? 0;
     let vatMode = orig.vatMode;
-    if (nowPrivat) {
+    if (nowRole === "PRIVAT" || nowRole === "GEWINN") {
       vatRate = null; vatCents = 0; vatMode = null;
     } else if (input.vatRate !== undefined) {
       const mode = input.vatMode ?? (orig.vatMode === "NET" ? "NET" : "GROSS");

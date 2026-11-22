@@ -168,8 +168,8 @@ export function buildPersonReport(input: {
       opening.capitalCents,
       [
         ...split("+ Einlagen", "partnerDeltaCents", rows, ["PARTNER_DEPOSIT"]),
-        ...split("− Entnahmen", "partnerDeltaCents", rows, ["PARTNER_DRAW"]),
-        { label: "+ Gewinnanteile", cents: sum(rows, "partnerDeltaCents", ["PARTNER_PROFIT"]) },
+        ...split("− Kapitalrückzahlung / Entnahmen", "partnerDeltaCents", rows, ["PARTNER_DRAW"]),
+        { label: "+ Gewinnanteil-Auszahlungen", cents: sum(rows, "partnerDeltaCents", ["PARTNER_PROFIT"]) },
         { label: "− Einkäufe für die Firma (vom Kapital)", cents: sum(rows, "partnerDeltaCents", ["EXPENSE"]) },
       ],
       `Restguthaben Kapitalkonto ${name}`,

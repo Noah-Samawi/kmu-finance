@@ -189,7 +189,7 @@ export interface NewEntry {
   vatRate?: number | null;
   vatCents?: number;
   vatMode?: "GROSS" | "NET" | null;
-  partnerRole?: "FIRMA" | "PRIVAT" | null;
+  partnerRole?: "FIRMA" | "PRIVAT" | "GEWINN" | null;
 }
 
 export async function insertEntry(tx: Tx, ctx: Ctx, tenantId: string, e: NewEntry) {
