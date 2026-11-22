@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { requireUser } from "@/lib/auth";
 import { poolOverview } from "@/application/pool/pool";
 import { listEmployees } from "@/application/employees/employees";
@@ -9,6 +10,8 @@ import { LedgerFilterBar } from "@/components/ledger-filter-bar";
 import { isFiltered, parseLedgerFilter } from "@/domain/ledger-filter";
 import { PageHeader, Section } from "@/components/ui";
 import { LedgerList } from "@/components/ledger-list";
+import { CashbookTable } from "@/components/cashbook-table";
+import { CashbookToolbar } from "@/components/cashbook-toolbar";
 import { AccountFlowList } from "@/components/account-flow";
 import { BalanceCorrectionForm, DailyIncomeForm, ExpenseForm } from "@/components/cash-forms";
 import { formatCents } from "@/domain/money";
@@ -24,29 +27,49 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
   const today = todayKey();
   const sp = await searchParams;
   const filter = parseLedgerFilter(sp);
-  const from = sp.from && DAY.test(sp.from) ? sp.from : undefined;
-  const to = sp.to && DAY.test(sp.to) ? sp.to : undefined;
-  const filtered = isFiltered(filter) || !!from || !!to;
+  const from = sp.from && DAY.test(sp.from) ? sp.from : `${monthKey()}-01`;
+  const to = sp.to && DAY.test(sp.to) ? sp.to : today;
+  const filtered = isFiltered(filter) || !!(sp.from || sp.to);
   const branchId = filter.branchId;
-  const [pool, employees, persons, month, day, branches] = await Promise.all([
+  const assignMode = sp.assign === "1";
+  const accountView = filter.account === "BANK" ? "BANK" as const : filter.account === "CASH" ? "CASH" as const : "BOTH" as const;
+
+  const [pool, employees, persons, month, day, branches, periodRows] = await Promise.all([
     poolOverview(user), listEmployees(user), listPersons(user),
     getSummary(user, `${monthKey()}-01`, today, undefined, branchId),
     getSummary(user, today, today, undefined, branchId),
     listBranches(user),
+    listLedger(user, { from, to, filter, limit: 2000 }),
   ]);
-  const moneyRows = filtered
-    ? (await listLedger(user, { from, to, filter, limit: 500 })).filter((r) => r.cashDeltaCents !== 0 || r.bankDeltaCents !== 0)
-    : pool.entries;
+
+  const moneyRows = periodRows.filter((r) => r.cashDeltaCents !== 0 || r.bankDeltaCents !== 0);
   const cats = month.summary.totals.expensesByCategory;
   const active = employees.filter((e) => e.isActive);
+  const cashNow = branchId ? month.summary.cash.closingCents : pool.cashBalanceCents;
+  const bankNow = branchId ? month.summary.bank.closingCents : pool.bankBalanceCents;
+  const closingForBook = accountView === "BANK" ? bankNow : accountView === "CASH" ? cashNow : cashNow + bankNow;
+  const withoutBeleg = moneyRows.filter((r) => !r.attachmentId).length;
+  const branchLabel = branchId === "none" ? "Ohne Filiale" : branches.find((b) => b.id === branchId)?.name;
   const accounts = [
-    { key: "CASH" as const, title: "Kasse (Bar)", now: branchId ? month.summary.cash.closingCents : pool.cashBalanceCents, month: month.summary.cash, today: day.summary.cash },
-    { key: "BANK" as const, title: "Bankkonto", now: branchId ? month.summary.bank.closingCents : pool.bankBalanceCents, month: month.summary.bank, today: day.summary.bank },
+    { key: "CASH" as const, title: "Kasse (Bar)", now: cashNow, month: month.summary.cash, today: day.summary.cash },
+    { key: "BANK" as const, title: "Bankkonto", now: bankNow, month: month.summary.bank, today: day.summary.bank },
   ];
 
   return (
     <>
-      <PageHeader title="Kasse & Bank" subtitle="Kasse (Bar) und Bankkonto als getrennte Konten – Tageseinnahmen, Ausgaben und Korrekturen je Konto, lückenlos protokolliert." />
+      <PageHeader title="Kasse & Bank" subtitle="DATEV-Kassenbuch: Bestand, Erfassen, Belege zuordnen und laufender Kontostand je Buchung." />
+
+      <Suspense fallback={null}>
+        <CashbookToolbar
+          cashCents={cashNow}
+          bankCents={bankNow}
+          branchLabel={branchLabel}
+          from={from}
+          to={to}
+          branchId={branchId}
+          withoutBelegCount={withoutBeleg}
+        />
+      </Suspense>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
         {accounts.map((a) => (
@@ -110,7 +133,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
         </Section>
       </div>
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-3">
+      <div id="erfassen" className="mb-6 scroll-mt-20 grid gap-6 lg:grid-cols-3">
         <Section title="Tageseinnahme erfassen">
           <DailyIncomeForm today={today} branches={branches} />
         </Section>
@@ -128,11 +151,26 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
         </Section>
       </div>
 
-      <Section title="Bewegungen Kasse (Bar) und Bankkonto – je Buchung mit Konto" flush>
+      <Section title="Kassenbuch – Bewegungen mit laufendem Bestand" flush>
         <LedgerFilterBar action="/admin/cash" filter={filter} from={from} to={to} branches={branches} persons={persons}
           count={filtered ? moneyRows.length : undefined} />
-        <LedgerList rows={moneyRows} mode="pool" showEmployee admin branches={branches} persons={persons}
-          emptyTitle={filtered ? "Keine Buchungen für diesen Filter" : undefined} />
+        {/* Desktop: DATEV-Tabelle */}
+        <div className="hidden md:block">
+          <CashbookTable
+            rows={moneyRows}
+            account={accountView}
+            closingCents={closingForBook}
+            admin
+            branches={branches}
+            persons={persons}
+            highlightWithoutBeleg={assignMode}
+          />
+        </div>
+        {/* Mobil: Kartenansicht */}
+        <div className="md:hidden">
+          <LedgerList rows={moneyRows} mode="pool" showEmployee admin branches={branches} persons={persons}
+            emptyTitle={filtered ? "Keine Buchungen für diesen Filter" : undefined} />
+        </div>
       </Section>
     </>
   );

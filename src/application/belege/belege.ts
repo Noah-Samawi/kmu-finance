@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { lockTenantLedger, withTenant } from "@/infrastructure/db/tenant-tx";
-import { belege, branches, ledgerAttachments } from "@/infrastructure/db/schema";
+import { belege, branches, ledgerAttachments, ledgerEntries } from "@/infrastructure/db/schema";
 import { storage } from "@/infrastructure/storage";
 import { badRequest, conflict, notFound, rule } from "@/domain/errors";
 import { ACCOUNT_LABEL } from "@/domain/accounts";
@@ -369,5 +369,103 @@ export async function purgeBelege(ctx: Ctx, ids: string[]) {
     await tx.delete(belege).where(and(eq(belege.tenantId, tenantId), inArray(belege.id, ids)));
     await audit(tx, ctx, "beleg.purge", "Beleg", ids[0], { ids, count: ids.length });
     return { count: ids.length };
+  });
+}
+
+/**
+ * Beleg aus dem Posteingang an eine bestehende Kasse/Bank-Buchung hängen –
+ * ohne neue Buchung (keine Doppelbuchung). Beleg → Belegablage.
+ */
+export async function attachBelegToEntry(ctx: Ctx, belegId: string, ledgerEntryId: string) {
+  requireRole(ctx, "ADMIN");
+  const tenantId = tid(ctx);
+  return withTenant(ctx, async (tx) => {
+    await lockTenantLedger(tx, tenantId);
+    const [b] = await tx.select().from(belege)
+      .where(and(eq(belege.id, belegId), eq(belege.tenantId, tenantId))).for("update");
+    if (!b) throw notFound("Beleg");
+    if (b.status !== "INBOX") throw rule("Nur Belege im Posteingang können zugeordnet werden");
+    if (b.ledgerEntryId) throw rule("Beleg ist bereits einer Buchung zugeordnet");
+
+    const entry = await tx.query.ledgerEntries.findFirst({
+      where: and(eq(ledgerEntries.id, ledgerEntryId), eq(ledgerEntries.tenantId, tenantId)),
+    });
+    if (!entry) throw notFound("Buchung");
+    if (entry.closingId) throw rule("Buchung liegt in einem abgeschlossenen Monat");
+
+    const existingAtt = await tx.query.ledgerAttachments.findFirst({
+      where: eq(ledgerAttachments.ledgerEntryId, ledgerEntryId),
+    });
+    if (existingAtt) throw rule("Diese Buchung hat bereits einen Beleg");
+
+    const taken = await tx.query.belege.findFirst({
+      where: and(eq(belege.ledgerEntryId, ledgerEntryId), eq(belege.tenantId, tenantId)),
+    });
+    if (taken) throw rule("Diese Buchung ist bereits mit einem Beleg verknüpft");
+
+    await tx.insert(ledgerAttachments).values({
+      tenantId,
+      ledgerEntryId,
+      fileKey: b.fileKey,
+      mime: b.fileMime,
+      name: b.fileName ?? "beleg",
+      createdById: ctx.userId,
+    });
+
+    await tx.update(belege).set({
+      status: "FILED",
+      ledgerEntryId,
+      filedAt: new Date(),
+      updatedAt: new Date(),
+      // Metadaten aus der Buchung übernehmen, falls Beleg noch leer
+      direction: b.direction ?? (entry.cashDeltaCents + entry.bankDeltaCents >= 0 ? "INCOME" : "EXPENSE"),
+      accountKind: b.accountKind ?? entry.accountKind,
+      amountCents: b.amountCents ?? Math.abs(entry.cashDeltaCents || entry.bankDeltaCents),
+      bookingDate: b.bookingDate ?? entry.bookingDate,
+      branchId: b.branchId ?? entry.branchId,
+      merchant: b.merchant ?? entry.description,
+      category: b.category ?? entry.category,
+    }).where(eq(belege.id, belegId));
+
+    await audit(tx, ctx, "beleg.attach", "Beleg", belegId, { ledgerEntryId });
+    return { belegId, ledgerEntryId };
+  });
+}
+
+/**
+ * Verknüpften Beleg von einer Buchung lösen.
+ * belegTo: INBOX = nur Datei weg (erneut zuordenbar); TRASH = Beleg in Papierkorb.
+ */
+export async function detachBelegFromEntry(
+  ctx: Ctx,
+  ledgerEntryId: string,
+  opts: { belegTo?: "INBOX" | "TRASH" } = {},
+) {
+  requireRole(ctx, "ADMIN");
+  const tenantId = tid(ctx);
+  const belegTo = opts.belegTo ?? "INBOX";
+  return withTenant(ctx, async (tx) => {
+    const att = await tx.query.ledgerAttachments.findFirst({
+      where: and(eq(ledgerAttachments.ledgerEntryId, ledgerEntryId), eq(ledgerAttachments.tenantId, tenantId)),
+    });
+    if (!att) throw notFound("Belegdatei");
+
+    await tx.delete(ledgerAttachments).where(eq(ledgerAttachments.id, att.id));
+
+    const linked = await tx.query.belege.findFirst({
+      where: and(eq(belege.ledgerEntryId, ledgerEntryId), eq(belege.tenantId, tenantId)),
+    });
+    if (linked) {
+      await tx.update(belege).set({
+        status: belegTo,
+        ledgerEntryId: null,
+        filedAt: null,
+        trashedAt: belegTo === "TRASH" ? new Date() : null,
+        updatedAt: new Date(),
+      }).where(eq(belege.id, linked.id));
+    }
+
+    await audit(tx, ctx, "beleg.detach", "LedgerEntry", ledgerEntryId, { belegId: linked?.id ?? null, belegTo });
+    return { ledgerEntryId, belegId: linked?.id ?? null };
   });
 }

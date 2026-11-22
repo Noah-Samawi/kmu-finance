@@ -7,6 +7,7 @@ import { formatCents } from "@/domain/money";
 import { categoryLabel, entryLabel } from "@/domain/cash";
 import { Empty, Money, Pill } from "./ui";
 import { EntryActions } from "./entry-actions";
+import { AttachBelegButton, DetachBelegButton } from "./attach-beleg";
 import type { BranchOption } from "./branch-category";
 import type { PersonOption } from "./cash-forms";
 
@@ -63,6 +64,7 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds, branc
             </p>
             <p className="text-xs text-muted">
               {fmtDateTime(r.bookingDate)}
+              {!r.attachmentId && admin && mode === "pool" && <> · <span className="text-amber-700">Ohne Beleg</span></>}
               {r.attachmentId && (
                 <> · <a className="text-ledger underline-offset-2 hover:underline" href={`/api/v1/ledger/${r.id}/attachment`} target="_blank" rel="noreferrer">Beleg ansehen</a></>
               )}
@@ -98,6 +100,12 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds, branc
                 <span className="me-1 text-xs text-muted">Kapital</span>
                 <Money cents={r.partnerDeltaCents} signed className="font-semibold" />
               </span>
+            )}
+            {admin && mode === "pool" && !r.attachmentId && (
+              <AttachBelegButton ledgerEntryId={r.id} />
+            )}
+            {admin && mode === "pool" && r.attachmentId && (
+              <DetachBelegButton ledgerEntryId={r.id} />
             )}
             {admin && DIRECTLY_REVERSIBLE.includes(r.type) && !reversed.has(r.id) && !r.closingId && (
               <EntryActions
