@@ -213,9 +213,12 @@ export async function buildSummary(
     const mine = rows.filter((r) => r.employeeId === p.id);
     const row: PartnerSummary = {
       partnerId: p.id, name: p.name, openingCents: opening,
-      depositCents: sumPartner("PARTNER_DEPOSIT", p.id),
-      drawCents: neg(sumPartner("PARTNER_DRAW", p.id)),
-      profitCents: sumPartner("PARTNER_PROFIT", p.id),
+      // Einlage: partnerDelta negativ → als Betrag der Einlage positiv ausweisen
+      depositCents: neg(sumPartner("PARTNER_DEPOSIT", p.id)),
+      // Rückzahlung an ihn: partnerDelta positiv
+      drawCents: sumPartner("PARTNER_DRAW", p.id),
+      // Gewinnanteil: Kasse−, ohne partnerDelta → aus Cash/Bank-Abfluss
+      profitCents: neg(mine.filter((r) => effType(r) === "PARTNER_PROFIT").reduce((t, r) => t + r.cashDeltaCents + r.bankDeltaCents, 0)),
       closingCents: 0,
       outlayOpeningCents: outlayOpening,
       outlayCents: sumClaim("PARTNER_OUTLAY", p.id),
@@ -223,10 +226,11 @@ export async function buildSummary(
       outlayClosingCents: outlayOpening + mine.reduce((t, r) => t + r.claimDeltaCents, 0),
       budgetOpeningCents: budgetOpening,
       budgetClosingCents: budgetOpening + mine.reduce((t, r) => t + r.walletDeltaCents, 0),
-      expenseCents: neg(mine.filter((r) => effType(r) === "PARTNER_EXPENSE" || effType(r) === "EXPENSE").reduce((t, r) => t + r.poolDeltaCents, 0)),
+      expenseCents: neg(mine.filter((r) => effType(r) === "PARTNER_EXPENSE" || (effType(r) === "EXPENSE" && r.partnerRole === "FIRMA")).reduce((t, r) => t + r.poolDeltaCents, 0)),
       purchaseCapitalCents: neg(sumPartner("EXPENSE", p.id)),
     };
-    row.closingCents = row.openingCents + row.depositCents - row.drawCents + row.profitCents - row.purchaseCapitalCents;
+    // Kapitalkonto-Schluss = Opening + alle partnerDeltas (Einlage −, Rückzahlung +, Einkauf vom Kapital …)
+    row.closingCents = opening + mine.reduce((t, r) => t + r.partnerDeltaCents, 0);
     if (row.openingCents || row.closingCents || row.depositCents || row.drawCents || row.profitCents
       || row.outlayOpeningCents || row.outlayClosingCents || row.outlayCents || row.refundCents
       || row.budgetOpeningCents || row.budgetClosingCents || row.expenseCents || row.purchaseCapitalCents) partners.push(row);

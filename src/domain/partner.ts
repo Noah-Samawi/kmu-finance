@@ -115,16 +115,17 @@ export function partnerPosting(kind: PartnerKind, source: FundingSource | null, 
   const a = amountCents;
   switch (kind) {
     case "DEPOSIT":
-      return { type: "PARTNER_DEPOSIT", deltas: { ...none, ...account(a, src!), partnerDeltaCents: a } };
+      // Kapital an die Firma: Kasse/Bank +, Partner-Kapitalkonto − (er hat der Firma gegeben)
+      return { type: "PARTNER_DEPOSIT", deltas: { ...none, ...account(a, src!), partnerDeltaCents: -a } };
     case "OUTLAY":
       return src === "PRIVATE"
         ? { type: "PARTNER_OUTLAY", deltas: { ...none, claimDeltaCents: a, accountKind: null } }
         : { type: "PARTNER_EXPENSE", deltas: { ...none, ...account(-a, src!) } };
     case "DRAW":
-      // Kapitalrückzahlung: Kasse/Bank −, Kapitalkonto − (Richtung Null)
-      return { type: "PARTNER_DRAW", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: -a } };
+      // Kapital zurück an ihn: Kasse/Bank −, Partner-Kapitalkonto + (Richtung Null)
+      return { type: "PARTNER_DRAW", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: a } };
     case "PROFIT":
-      // Gewinnanteil-Auszahlung: Kasse/Bank −, Kapitalkonto unverändert (Spalte Gewinnanteil)
+      // Gewinnanteil: Kasse/Bank −, Kapital unverändert (Spalte Gewinnanteil +)
       return { type: "PARTNER_PROFIT", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: 0 } };
     case "BUDGET":
       return { type: "ALLOCATION", deltas: { ...none, ...account(-a, src!), walletDeltaCents: a } };

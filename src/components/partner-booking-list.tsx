@@ -46,16 +46,23 @@ function activitiesFrom(
 ): Activity[] {
   const bookingLedgerIds = new Set(rows.map((b) => b.ledgerEntryId));
   const fromBookings: Activity[] = rows.map((b) => {
-    const outflow = b.kind === "DRAW" || b.kind === "OUTLAY_REFUND" || b.kind === "BUDGET"
-      || b.kind === "PURCHASE_CAPITAL" || b.kind === "PURCHASE_BUDGET" || b.kind === "PROFIT"
-      || (b.kind === "OUTLAY" && b.source !== "PRIVATE");
+    // Partner-Sicht: Einlage −; Rückzahlung/Gewinn/Budget +; Firmenausgaben −
+    let signed = b.amountCents;
+    if (b.kind === "DEPOSIT") signed = -b.amountCents;
+    else if (b.kind === "DRAW" || b.kind === "PROFIT" || b.kind === "BUDGET") signed = b.amountCents;
+    else if (b.kind === "OUTLAY" && b.source === "PRIVATE") signed = b.amountCents;
+    else if (
+      b.kind === "OUTLAY_REFUND" || b.kind === "PURCHASE_CAPITAL" || b.kind === "PURCHASE_BUDGET"
+      || b.kind === "BUDGET_RETURN" || b.kind === "BUDGET_SETTLED"
+      || (b.kind === "OUTLAY" && b.source !== "PRIVATE")
+    ) signed = -b.amountCents;
     return {
       key: `b-${b.id}`,
       art: artFromPartnerKind(b.kind, b.source),
       title: t(`pb.kind.${b.kind}` as MsgKey),
       purpose: b.purpose,
       date: b.bookingDate,
-      amountCents: outflow ? -b.amountCents : b.amountCents,
+      amountCents: signed,
       ledgerEntryId: b.ledgerEntryId,
       branchId: b.branchId,
       branchName: b.branchName,
@@ -74,9 +81,19 @@ function activitiesFrom(
         if (tEff !== "EXPENSE" && tEff !== "PARTNER_EXPENSE") return null;
       }
       const paid = e.cashDeltaCents + e.bankDeltaCents;
+      const resolvedArt = art === "SONST" && (tEff === "EXPENSE" || tEff === "PARTNER_EXPENSE") ? "FIRMA" as const : art;
+      // Partner-Sicht: Zuflüsse an ihn +, Einlage/Firmenausgabe −
+      let signed = paid !== 0 ? paid : e.partnerDeltaCents || e.walletDeltaCents || e.claimDeltaCents;
+      if (resolvedArt === "GEWINN" || resolvedArt === "LOHN" || resolvedArt === "RUECKZAHLUNG" || resolvedArt === "BUDGET") {
+        signed = Math.abs(paid || e.walletDeltaCents || e.partnerDeltaCents);
+      } else if (resolvedArt === "KAPITAL") {
+        signed = e.partnerDeltaCents !== 0 ? e.partnerDeltaCents : -Math.abs(paid);
+      } else if (resolvedArt === "FIRMA") {
+        signed = paid !== 0 ? (paid < 0 ? paid : -paid) : -Math.abs(e.partnerDeltaCents);
+      }
       return {
         key: `l-${e.id}`,
-        art: art === "SONST" && (tEff === "EXPENSE" || tEff === "PARTNER_EXPENSE") ? "FIRMA" as const : art,
+        art: resolvedArt,
         title: e.partnerRole === "LOHN" ? "Lohn"
           : e.partnerRole === "GEWINN" ? "Gewinnanteil-Auszahlung"
             : e.partnerRole === "PRIVAT" ? "Kapitalrückzahlung"
@@ -84,7 +101,7 @@ function activitiesFrom(
                 : (e.description?.split(" · ")[0] || tEff),
         purpose: e.description ?? "",
         date: e.bookingDate,
-        amountCents: paid !== 0 ? paid : e.partnerDeltaCents || e.walletDeltaCents || e.claimDeltaCents,
+        amountCents: signed,
         ledgerEntryId: e.id,
         branchId: e.branchId,
         branchName: e.branchName,

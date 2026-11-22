@@ -164,14 +164,14 @@ export function buildPersonReport(input: {
 
   const accounts = [budget, outlay];
   if (person.role === "PARTNER") {
-    accounts.push(block("CAPITAL", "Kapitalkonto", "Einlagen − Kapitalrückzahlungen − Einkäufe vom Kapital (Gewinnanteil separat)",
+    accounts.push(block("CAPITAL", "Kapitalkonto", "Einlage an Firma (−) · Kapital zurück an ihn (+) · Gewinnanteil separat",
       opening.capitalCents,
       [
-        ...split("+ Einlagen", "partnerDeltaCents", rows, ["PARTNER_DEPOSIT"]),
-        ...split("− Kapitalrückzahlung / Entnahmen", "partnerDeltaCents", rows, ["PARTNER_DRAW"]),
-        { label: "− Einkäufe für die Firma (vom Kapital)", cents: sum(rows, "partnerDeltaCents", ["EXPENSE"]) },
+        ...split("Einlage an Firma (Kapital −)", "partnerDeltaCents", rows, ["PARTNER_DEPOSIT"]),
+        ...split("Kapital zurück an ihn (Kapital +)", "partnerDeltaCents", rows, ["PARTNER_DRAW"]),
+        { label: "Einkäufe für die Firma (vom Kapital)", cents: sum(rows, "partnerDeltaCents", ["EXPENSE"]) },
       ],
-      `Restguthaben Kapitalkonto ${name}`,
+      `Kapitalkonto ${name} (0 = Einlagen zurückgezahlt)`,
     ));
   }
 

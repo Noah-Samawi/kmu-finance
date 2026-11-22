@@ -166,9 +166,12 @@ async function book(tx: Tx, ctx: Ctx, tenantId: string, partnerId: string, input
     const avail = await bankBalance(tx, tenantId);
     if (avail + deltas.bankDeltaCents < 0) throw insufficient("Bankkonto", avail);
   }
-  if (deltas.partnerDeltaCents < 0) {
+  // Kapital zurück an ihn (DRAW): darf Einlagen nicht überschreiten (Saldo nicht über 0)
+  if (input.kind === "DRAW" && deltas.partnerDeltaCents > 0) {
     const cap = await partnerBalance(tx, tenantId, partnerId);
-    if (cap + deltas.partnerDeltaCents < 0) throw insufficient("Kapitalkonto", cap);
+    if (cap + deltas.partnerDeltaCents > 0) {
+      throw rule(`Kapitalrückzahlung übersteigt die Einlagen (Kapitalkonto ${cap / 100} €)`);
+    }
   }
   if (deltas.walletDeltaCents < 0) {
     const w = await walletBalance(tx, tenantId, partnerId);

@@ -203,8 +203,11 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
       if (avail < payCents) throw insufficient(ACCOUNT_LABEL[input.fund], avail);
     }
     if (isDraw) {
+      // Kapitalkonto ist nach Einlagen negativ; Rückzahlung darf nicht über 0 hinaus
       const cap = await partnerBalance(tx, tenantId, person!.id);
-      if (cap < payCents) throw insufficient(`Kapitalkonto von ${person!.name}`, cap);
+      if (cap + payCents > 0) {
+        throw rule(`Kapitalrückzahlung übersteigt die Einlagen von ${person!.name} (Kapitalkonto ${(cap / 100).toFixed(2)} €)`);
+      }
     }
 
     const batchId = splits.length > 1 ? randomUUID() : null;

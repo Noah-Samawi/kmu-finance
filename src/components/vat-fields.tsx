@@ -68,10 +68,10 @@ export function PartnerRoleField({ show, value, onChange, mode = "partner" }: {
       ["LOHN", "Lohn", "Kasse/Bank −; als Lohn auf dem Personenkonto ausgewiesen."],
     ] as const)
     : ([
-      ["FIRMA", "Firmenausgabe / Betriebsausgabe", "Kasse/Bank −; Spalte Betriebsausgaben (Kapital unverändert)."],
-      ["GEWINN", "Gewinnanteil-Auszahlung", "Kasse/Bank −; Spalte Gewinnanteil (Kapitalkonto unverändert)."],
-      ["PRIVAT", "Kapitalrückzahlung / Entnahme", "Kasse/Bank − und Kapitalkonto − (Richtung Null)."],
-      ["LOHN", "Lohn", "Kasse/Bank −; Spalte Lohn (Kapital unverändert)."],
+      ["FIRMA", "Firmenausgabe / Betriebsausgabe", "Kasse/Bank −; Spalte Betriebsausgaben (Firma)."],
+      ["GEWINN", "Gewinnanteil-Auszahlung", "Kasse/Bank −; bei ihm Gewinnanteil + (gutgeschrieben)."],
+      ["PRIVAT", "Kapitalrückzahlung an ihn", "Kasse/Bank −; sein Kapitalkonto + (Richtung Null nach Einlage)."],
+      ["LOHN", "Lohn", "Kasse/Bank −; bei ihm Lohn + (gutgeschrieben)."],
     ] as const);
   return (
     <fieldset className="rounded-lg border-2 border-ink/20 bg-paper p-3">

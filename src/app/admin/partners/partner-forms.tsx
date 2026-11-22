@@ -144,12 +144,12 @@ function AdminBookingForm({ partner, branches }: { partner: Partner; branches?: 
         </p>
       )}
       <p className="text-xs text-muted sm:col-span-2">
-        {kind === "DEPOSIT" && "Einlage: Geld auf Kasse/Bank der Firma → Kapitalkonto +."}
-        {kind === "PROFIT" && "Gewinnanteil: Kasse/Bank −, Spalte Gewinnanteil (Kapitalkonto unverändert)."}
-        {kind === "DRAW" && "Kapitalrückzahlung: Kasse/Bank −, Kapitalkonto − (Richtung Null)."}
-        {kind === "BUDGET" || kind === "BUDGET_RETURN" || kind === "BUDGET_SETTLED"
-          ? "Budget landet in „Budget / Vorschuss“ und wird nie mit „Vorgelegtes Geld“ verrechnet."
-          : null}
+        {kind === "DEPOSIT" && "Kapital an Firma: Kasse/Bank +, sein Kapitalkonto − (er gibt der Firma)."}
+        {kind === "PROFIT" && "Gewinnanteil: Kasse/Bank −, bei ihm Gewinnanteil + (gutgeschrieben)."}
+        {kind === "DRAW" && "Kapital zurück an ihn: Kasse/Bank −, Kapitalkonto + (Richtung Null)."}
+        {kind === "BUDGET" && "Budget/Einkäufe: Kasse/Bank −, Budget/Vorschuss + (gutgeschrieben). Nie mit Auslagen verrechnet."}
+        {(kind === "BUDGET_RETURN" || kind === "BUDGET_SETTLED")
+          && "Budget landet in „Budget / Vorschuss“ und wird nie mit „Vorgelegtes Geld“ verrechnet."}
         {kind === "OUTLAY" && "Auslage aus eigener Tasche → Auslagenkonto; Firmenkarte/Kasse → Betriebsausgabe ohne Erstattungsanspruch."}
         {!["DEPOSIT", "PROFIT", "DRAW", "BUDGET", "BUDGET_RETURN", "BUDGET_SETTLED", "OUTLAY"].includes(kind)
           && "Offene Auslagen bitte ausschließlich über „Auslagen-Erstattung“ ausgleichen."}

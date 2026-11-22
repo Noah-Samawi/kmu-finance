@@ -61,9 +61,11 @@ export function deltasFor(
     case "OUTLAY_REPAY":
       return { ...zero, ...splitPool(-amountCents, account), claimDeltaCents: -amountCents, accountKind: account };
     case "PARTNER_DEPOSIT":
-      return { ...zero, ...splitPool(amountCents, account), partnerDeltaCents: amountCents, accountKind: account };
+      // Kapital an Firma: Kasse/Bank +, Partner-Kapital −
+      return { ...zero, ...splitPool(amountCents, account), partnerDeltaCents: -amountCents, accountKind: account };
     case "PARTNER_DRAW":
-      return { ...zero, ...splitPool(-amountCents, account), partnerDeltaCents: -amountCents, accountKind: account };
+      // Kapital zurück an Gesellschafter: Kasse/Bank −, Partner-Kapital + (Richtung 0)
+      return { ...zero, ...splitPool(-amountCents, account), partnerDeltaCents: amountCents, accountKind: account };
     case "PARTNER_PROFIT":
       // Gewinnanteil-Auszahlung: Kasse/Bank −, Kapitalkonto unverändert (eigene Spalte)
       return { ...zero, ...splitPool(-amountCents, account), partnerDeltaCents: 0, accountKind: account };

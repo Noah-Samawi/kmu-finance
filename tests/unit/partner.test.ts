@@ -51,15 +51,18 @@ describe("Gesellschafter: Vorgelegtes Geld strikt getrennt", () => {
       { kind: "BUDGET_RETURN", source: "CASH", amount: 10_000 },
     ]);
     expect(s.outlay).toBe(100_000);
-    expect(s.capital).toBe(30_000); // +50k Einlage −20k Rückzahlung (Gewinnanteil nicht im Kapital)
+    // Einlage −50k, Rückzahlung +20k → Kapital −30k (Gewinnanteil nicht im Kapital)
+    expect(s.capital).toBe(-30_000);
     expect(s.bank).toBe(20_000); // +50k −30k Gewinnanteil
     expect(s.cash).toBe(-10_000); // −20k DRAW +10k BUDGET_RETURN
   });
 
-  it("Kapitalrückzahlung und Gewinnanteil belasten Kasse/Bank korrekt", () => {
+  it("Kapital an Firma / zurück an ihn und Gewinnanteil", () => {
+    const dep = partnerPosting("DEPOSIT", "BANK", 500_000);
+    expect(dep.deltas).toMatchObject({ bankDeltaCents: 500_000, partnerDeltaCents: -500_000 });
     const draw = partnerPosting("DRAW", "CASH", 100_000);
     expect(draw.type).toBe("PARTNER_DRAW");
-    expect(draw.deltas).toMatchObject({ cashDeltaCents: -100_000, partnerDeltaCents: -100_000 });
+    expect(draw.deltas).toMatchObject({ cashDeltaCents: -100_000, partnerDeltaCents: 100_000 });
     const profit = partnerPosting("PROFIT", "BANK", 300_000);
     expect(profit.type).toBe("PARTNER_PROFIT");
     expect(profit.deltas).toMatchObject({ bankDeltaCents: -300_000, partnerDeltaCents: 0 });

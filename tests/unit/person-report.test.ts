@@ -74,7 +74,7 @@ describe("Einzelbericht je Person", () => {
         },
       ],
     });
-    expect(acc(r, "CAPITAL").closingCents).toBe(200_000);
+    expect(acc(r, "CAPITAL").closingCents).toBe(-200_000); // Einlage an Firma → Kapital −
     const o = acc(r, "OUTLAY");
     expect(o.closingCents).toBe(100_000);
     expect(o.firmViewCents).toBe(-100_000);
@@ -85,9 +85,9 @@ describe("Einzelbericht je Person", () => {
   it("Storno einer Einlage + Umbuchung als Auslage (Datenkorrektur) wirkt netto korrekt", () => {
     const dep: PersonLedgerRow = {
       id: "d1", type: "PARTNER_DEPOSIT", reversedType: null, reversalOfId: null, bookingDate: day(9),
-      cashDeltaCents: 0, bankDeltaCents: 0, walletDeltaCents: 0, claimDeltaCents: 0, partnerDeltaCents: 100_000, accountKind: null, description: "Einlage · Eigene Tasche / Privat",
+      cashDeltaCents: 0, bankDeltaCents: 0, walletDeltaCents: 0, claimDeltaCents: 0, partnerDeltaCents: -100_000, accountKind: null, description: "Einlage · Bank",
     };
-    const rev: PersonLedgerRow = { ...dep, id: "d2", type: "REVERSAL", reversedType: "PARTNER_DEPOSIT", reversalOfId: "d1", partnerDeltaCents: -100_000, description: "Storno: Umbuchung" };
+    const rev: PersonLedgerRow = { ...dep, id: "d2", type: "REVERSAL", reversedType: "PARTNER_DEPOSIT", reversalOfId: "d1", partnerDeltaCents: 100_000, description: "Storno: Umbuchung" };
     const out: PersonLedgerRow = { ...dep, id: "d3", type: "PARTNER_OUTLAY", partnerDeltaCents: 0, claimDeltaCents: 100_000, description: "Auslage" };
     const r = buildPersonReport({ person: { id: "j", name: "Jamiel", role: "PARTNER" }, from: "2026-10-01", to: "2026-10-31", opening, rows: [dep, rev, out] });
     expect(acc(r, "CAPITAL").closingCents).toBe(0);

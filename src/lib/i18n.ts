@@ -69,7 +69,7 @@ const de = {
   "inv.smallBusinessLink": "Unter Briefkopf & Firma deaktivieren",
 
   "pb.capital": "Kapitalkonto",
-  "pb.capitalHint": "Einlagen − Kapitalrückzahlungen (Gewinnanteil separat)",
+  "pb.capitalHint": "Einlage an Firma − · Rückzahlung an ihn + (Gewinnanteil separat)",
   "pb.outlay": "Auslagenkonto – Firma schuldet dir",
   "pb.outlayHint": "Privat ausgelegtes Geld = offener Anspruch gegen die Firma (Verbindlichkeit der Firma). Sinkt nur durch ausdrückliche Erstattung – nie Teil des Kapitalkontos.",
   "pb.firmLiability": "Verbindlichkeit der Firma",
