@@ -12,7 +12,9 @@ import { ExpenseForm, type PersonOption } from "@/components/cash-forms";
 
 interface Partner {
   id: string; name: string; isActive: boolean; canViewReports: boolean; canViewBank: boolean;
-  capitalCents: number; outlayOpenCents: number; budgetCents: number; bookings: PartnerBookingRow[];
+  capitalCents: number; capitalReturnCents?: number; profitCents?: number;
+  companyExpenseCents?: number; wageCents?: number;
+  outlayOpenCents: number; budgetCents: number; bookings: PartnerBookingRow[];
 }
 
 export function PartnerForms({ partner, today, cashCents, bankCents, branches }: {
@@ -143,7 +145,7 @@ function AdminBookingForm({ partner, branches }: { partner: Partner; branches?: 
       )}
       <p className="text-xs text-muted sm:col-span-2">
         {kind === "DEPOSIT" && "Einlage: Geld auf Kasse/Bank der Firma → Kapitalkonto +."}
-        {kind === "PROFIT" && "Gewinnanteil: Kasse/Bank −, Kapitalkonto + (ihm gutgeschrieben)."}
+        {kind === "PROFIT" && "Gewinnanteil: Kasse/Bank −, Spalte Gewinnanteil (Kapitalkonto unverändert)."}
         {kind === "DRAW" && "Kapitalrückzahlung: Kasse/Bank −, Kapitalkonto − (Richtung Null)."}
         {kind === "BUDGET" || kind === "BUDGET_RETURN" || kind === "BUDGET_SETTLED"
           ? "Budget landet in „Budget / Vorschuss“ und wird nie mit „Vorgelegtes Geld“ verrechnet."

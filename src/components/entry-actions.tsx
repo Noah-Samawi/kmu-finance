@@ -14,7 +14,7 @@ import { ErrorNote, useApi } from "./use-api";
  */
 export function EntryActions({ id, amountCents, description, branchId, branches, persons, personId, partnerRole, canEdit = true, editHint }: {
   id: string; amountCents: number; description: string; branchId?: string | null; branches?: BranchOption[];
-  persons?: PersonOption[]; personId?: string | null; partnerRole?: "FIRMA" | "PRIVAT" | "GEWINN" | null;
+  persons?: PersonOption[]; personId?: string | null; partnerRole?: "FIRMA" | "PRIVAT" | "GEWINN" | "LOHN" | null;
   canEdit?: boolean; editHint?: string;
 }) {
   const { call, busy, error, setError } = useApi();
@@ -23,7 +23,7 @@ export function EntryActions({ id, amountCents, description, branchId, branches,
   const [text, setText] = useState(description);
   const [branch, setBranch] = useState(branchId ?? "");
   const [person, setPerson] = useState(personId ?? "");
-  const [role, setRole] = useState<"" | "FIRMA" | "PRIVAT" | "GEWINN">(partnerRole ?? "");
+  const [role, setRole] = useState<"" | "FIRMA" | "PRIVAT" | "GEWINN" | "LOHN">(partnerRole ?? "");
   const [reason, setReason] = useState("");
   const selected = persons?.find((p) => p.id === person);
   const isPartner = selected?.role === "PARTNER";
@@ -84,7 +84,12 @@ export function EntryActions({ id, amountCents, description, branchId, branches,
           {persons && persons.length > 0 && (
             <PersonSelect persons={persons} value={person} onChange={(id) => { setPerson(id); if (!persons.find((p) => p.id === id && p.role === "PARTNER")) setRole(""); }} />
           )}
-          <PartnerRoleField show={!!isPartner} value={role} onChange={setRole} />
+          <PartnerRoleField
+            show={!!isPartner || selected?.role === "EMPLOYEE"}
+            mode={isPartner ? "partner" : "employee"}
+            value={role}
+            onChange={setRole}
+          />
           <Field label="Grund der Änderung">
             <input value={reason} onChange={(e) => setReason(e.target.value)} required minLength={3} placeholder="z. B. Gesellschafter nachträglich zuordnen" className={inputCls} />
           </Field>

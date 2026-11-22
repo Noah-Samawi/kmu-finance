@@ -260,7 +260,7 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
   const [date, setDate] = useState(today);
   const [category, setCategory] = useState("WAREN");
   const [personId, setPersonId] = useState(preset?.id ?? "");
-  const [partnerRole, setPartnerRole] = useState<"" | "FIRMA" | "PRIVAT" | "GEWINN">("");
+  const [partnerRole, setPartnerRole] = useState<"" | "FIRMA" | "PRIVAT" | "GEWINN" | "LOHN">("");
   const autoPurpose = useRef("");
   const started = useRef(false);
   const [ocr, setOcr] = useState<{ busy: boolean; hint: (ScanResult & { text: string }) | null; error: string | null }>(
@@ -268,6 +268,7 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
   );
   const selected = persons.find((p) => p.id === personId);
   const isPartner = selected?.role === "PARTNER";
+  const isEmployee = selected?.role === "EMPLOYEE";
 
   /** Erkannte Werte direkt eintragen – der Nutzer gleicht nur noch mit dem Foto ab */
   function fill(h: ScanResult) {
@@ -439,7 +440,12 @@ export function ExpenseForm({ today, persons, preset, funds = ["CASH", "BANK"], 
               onChange={(id) => { setPersonId(id); setPartnerRole(""); }} />}
         <BranchSelect branches={branches} />
       </div>
-      <PartnerRoleField show={isPartner} value={partnerRole} onChange={setPartnerRole} />
+      <PartnerRoleField
+        show={isPartner || isEmployee}
+        mode={isPartner ? "partner" : "employee"}
+        value={partnerRole}
+        onChange={setPartnerRole}
+      />
       <ErrorNote error={error} />
       <button disabled={busy || ocr.busy} className={cx(btn.base, btn.primary, "w-full")}>{ocr.busy ? "Beleg wird analysiert …" : "Speichern / Buchen"}</button>
     </form>

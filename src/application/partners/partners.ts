@@ -13,6 +13,7 @@ import {
   walletBalance, walletBalancesByEmployee,
 } from "../ledger-service";
 import { ledgerRows } from "../reports/reports";
+import { partnerOverviewFromLedger } from "@/domain/partner-overview";
 import { partnerBookingRows } from "./partner-bookings";
 
 const publicCols = {
@@ -32,13 +33,20 @@ export async function listPartners(ctx: Ctx) {
     const outlays = await claimBalancesByEmployee(tx, tenantId);
     const budgets = await walletBalancesByEmployee(tx, tenantId);
     const bookings = await partnerBookingRows(tx, tenantId, { limit: 2000 });
-    return list.map((p) => ({
-      ...p,
-      capitalCents: capital.get(p.id) ?? 0,
-      outlayOpenCents: outlays.get(p.id) ?? 0,
-      budgetCents: budgets.get(p.id) ?? 0,
-      bookings: bookings.filter((b) => b.partnerId === p.id),
-    }));
+    const ledger = await ledgerRows(tx, tenantId, { limit: 5000 });
+    return list.map((p) => {
+      const capitalCents = capital.get(p.id) ?? 0;
+      const outlayOpenCents = outlays.get(p.id) ?? 0;
+      const budgetCents = budgets.get(p.id) ?? 0;
+      const personLedger = ledger.filter((e) => e.employeeId === p.id);
+      const figures = partnerOverviewFromLedger(personLedger, { capitalCents, outlayOpenCents, budgetCents });
+      return {
+        ...p,
+        ...figures,
+        bookings: bookings.filter((b) => b.partnerId === p.id),
+        ledgerEntries: personLedger,
+      };
+    });
   });
 }
 
@@ -50,14 +58,17 @@ export async function getPartner(ctx: Ctx, partnerId: string) {
     const p = isAdminLike(ctx.role)
       ? await loadPartner(tx, tenantId, partnerId, { requireActive: false })
       : (await tx.query.users.findFirst({ where: eq(users.id, ctx.userId) }))!;
+    const capitalCents = await partnerBalance(tx, tenantId, p.id);
+    const outlayOpenCents = await claimBalance(tx, tenantId, p.id);
+    const budgetCents = await walletBalance(tx, tenantId, p.id);
+    const entries = await ledgerRows(tx, tenantId, { employeeId: p.id, limit: 500 });
     return {
       id: p.id, name: p.name, email: p.email, isActive: p.isActive,
       canViewReports: p.canViewReports, canViewBank: p.canViewBank,
-      capitalCents: await partnerBalance(tx, tenantId, p.id),
-      outlayOpenCents: await claimBalance(tx, tenantId, p.id),
-      budgetCents: await walletBalance(tx, tenantId, p.id),
+      ...partnerOverviewFromLedger(entries, { capitalCents, outlayOpenCents, budgetCents }),
       bookings: await partnerBookingRows(tx, tenantId, { partnerId: p.id, limit: 500 }),
-      entries: await ledgerRows(tx, tenantId, { employeeId: p.id, limit: 200 }),
+      entries,
+      ledgerEntries: entries,
     };
   });
 }

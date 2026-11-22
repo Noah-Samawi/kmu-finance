@@ -150,7 +150,7 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     }
     const person = employeeId ? await loadAssignablePerson(tx, tenantId, employeeId) : null;
 
-    let partnerRole: "FIRMA" | "PRIVAT" | "GEWINN" | null = orig.partnerRole ?? null;
+    let partnerRole: "FIRMA" | "PRIVAT" | "GEWINN" | "LOHN" | null = orig.partnerRole ?? null;
     if (input.partnerRole !== undefined) partnerRole = input.partnerRole;
     if (input.personId !== undefined && !input.personId) partnerRole = null;
     if (person?.role === "PARTNER") {
@@ -163,9 +163,11 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     const roleOf = (t: string, r: typeof partnerRole) =>
       t === "PARTNER_DRAW" || r === "PRIVAT" ? "PRIVAT" as const
         : t === "PARTNER_PROFIT" || r === "GEWINN" ? "GEWINN" as const
-          : r === "FIRMA" ? "FIRMA" as const : null;
+          : r === "LOHN" ? "LOHN" as const
+            : r === "FIRMA" ? "FIRMA" as const : null;
     const wasRole = roleOf(orig.type, orig.partnerRole ?? null);
-    const nowRole = person?.role === "PARTNER" ? partnerRole : null;
+    const nowRole = person?.role === "PARTNER" ? partnerRole
+      : (person?.role === "EMPLOYEE" && partnerRole === "LOHN" ? "LOHN" as const : null);
     const canRetype = orig.type === "EXPENSE" || orig.type === "PARTNER_DRAW" || orig.type === "PARTNER_PROFIT";
 
     let type = orig.type;
@@ -181,10 +183,10 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
         type = "PARTNER_PROFIT";
         newD = deltasFor("PARTNER_PROFIT", newAmount, account);
         category = null;
-      } else if (nowRole === "FIRMA" || nowRole === null) {
+      } else if (nowRole === "LOHN" || nowRole === "FIRMA" || nowRole === null) {
         type = "EXPENSE";
         newD = expenseDeltas(account, newAmount);
-        category = orig.category ?? "SONSTIGES";
+        category = nowRole === "LOHN" ? null : (orig.category ?? "SONSTIGES");
       }
     } else if (canRetype && newAmount !== oldAmount && orig.walletDeltaCents === 0) {
       newD = type === "PARTNER_DRAW" ? deltasFor("PARTNER_DRAW", newAmount, account)
@@ -203,7 +205,7 @@ export async function editLedgerEntry(ctx: Ctx, entryId: string, input: z.infer<
     let vatRate = orig.vatRate;
     let vatCents = orig.vatCents ?? 0;
     let vatMode = orig.vatMode;
-    if (nowRole === "PRIVAT" || nowRole === "GEWINN") {
+    if (nowRole === "PRIVAT" || nowRole === "GEWINN" || nowRole === "LOHN") {
       vatRate = null; vatCents = 0; vatMode = null;
     } else if (input.vatRate !== undefined) {
       const mode = input.vatMode ?? (orig.vatMode === "NET" ? "NET" : "GROSS");

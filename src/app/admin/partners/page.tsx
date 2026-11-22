@@ -18,7 +18,7 @@ export default async function PartnersPage() {
   return (
     <>
       <PageHeader title="Partner & Gesellschafter"
-        subtitle="Kapitalkonto, Auslagenkonto (privat vorgelegt) und Budget – strikt getrennt. Alle Buchungen direkt hier, ohne Kontowechsel." />
+        subtitle="Kapital, Gewinnanteil, Betriebsausgaben, Lohn, Auslagen und Budget – getrennt. Buchungen aus Kasse & Bank erscheinen hier mit Filter." />
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="space-y-6">
           {partners.length === 0 ? <Section><Empty title="Noch keine Gesellschafter">Lege rechts den ersten Partner an.</Empty></Section> : (
@@ -32,12 +32,15 @@ export default async function PartnersPage() {
                       <p className="text-xs text-muted">Berichte {p.canViewReports ? "ja" : "nein"} · Bank {p.canViewBank ? "ja" : "nein"}</p>
                       <Link href={`/admin/reports/${p.id}`} className="text-sm font-medium text-ledger">Einzelbericht / Monatsbericht →</Link>
                     </div>
-                    <dl className="grid grid-cols-3 gap-4 text-right">
+                    <dl className="grid grid-cols-2 gap-3 text-right sm:grid-cols-3 lg:grid-cols-4">
                       <div><dt className="text-xs text-muted">Kapitalkonto</dt><dd><Money cents={p.capitalCents} className="font-semibold" /></dd></div>
+                      <div><dt className="text-xs text-muted">Kapitalrückzahlungen</dt><dd><Money cents={-(p.capitalReturnCents ?? 0)} className="font-semibold" /></dd></div>
+                      <div><dt className="text-xs text-muted">Gewinnanteil</dt><dd><Money cents={-(p.profitCents ?? 0)} className="font-semibold" /></dd></div>
+                      <div><dt className="text-xs text-muted">Betriebsausgaben</dt><dd><Money cents={-(p.companyExpenseCents ?? 0)} className="font-semibold" /></dd></div>
+                      <div><dt className="text-xs text-muted">Lohn</dt><dd><Money cents={-(p.wageCents ?? 0)} className="font-semibold" /></dd></div>
                       <div>
                         <dt className="text-xs text-muted">Auslagenkonto – Firma schuldet</dt>
                         <dd><Money cents={p.outlayOpenCents} className={p.outlayOpenCents > 0 ? "font-semibold text-minus" : "font-semibold"} /></dd>
-                        {p.outlayOpenCents > 0 && <dd className="text-xs text-minus">offene Verbindlichkeit der Firma <Money cents={-p.outlayOpenCents} /></dd>}
                       </div>
                       <div><dt className="text-xs text-muted">Budget / Vorschuss</dt><dd><Money cents={p.budgetCents} className="font-semibold" /></dd></div>
                     </dl>
@@ -45,8 +48,13 @@ export default async function PartnersPage() {
                   <PartnerForms partner={p} today={today} cashCents={pool.cashBalanceCents} bankCents={pool.bankBalanceCents} branches={branches} />
                 </div>
                 <div className="border-t border-line">
-                  <p className="px-4 pt-3 text-sm font-medium md:px-5">Buchungen (Herkunft, Zweck, Status)</p>
-                  <PartnerBookingList rows={p.bookings.slice(0, 30)} admin branches={branches} />
+                  <p className="px-4 pt-3 text-sm font-medium md:px-5">Buchungen (Filter / Gruppierung)</p>
+                  <PartnerBookingList
+                    rows={p.bookings.slice(0, 50)}
+                    ledgerEntries={p.ledgerEntries}
+                    admin
+                    branches={branches}
+                  />
                 </div>
               </Section>
             ))

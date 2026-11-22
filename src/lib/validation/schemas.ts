@@ -285,7 +285,7 @@ const vatRateField = z.union([z.number(), z.string(), z.null(), z.undefined()]).
     return parseVatRate(v);
   });
 const vatModeField = z.enum(["GROSS", "NET"]).default("GROSS");
-const partnerRoleField = z.enum(["FIRMA", "PRIVAT", "GEWINN"]).optional().nullable().transform((v) => v || null);
+const partnerRoleField = z.enum(["FIRMA", "PRIVAT", "GEWINN", "LOHN"]).optional().nullable().transform((v) => v || null);
 
 const percent0to20 = z.union([z.number(), z.string()]).transform((v, ctx) => {
   const n = typeof v === "number" ? v : Number(String(v).replace(",", ".").replace("%", "").trim());
@@ -350,8 +350,8 @@ export const editEntrySchema = z.object({
   reason: z.string().trim().min(3, "Grund der Änderung fehlt (mind. 3 Zeichen)").max(300),
   branchId: z.string().trim().max(64).optional().nullable(),
   personId: z.string().trim().max(64).optional().nullable(),
-  /** undefined = nicht anfassen; null = Rolle löschen; FIRMA/PRIVAT/GEWINN = setzen */
-  partnerRole: z.enum(["FIRMA", "PRIVAT", "GEWINN"]).nullish(),
+  /** undefined = nicht anfassen; null = Rolle löschen; FIRMA/PRIVAT/GEWINN/LOHN = setzen */
+  partnerRole: z.enum(["FIRMA", "PRIVAT", "GEWINN", "LOHN"]).nullish(),
   vatRate: vatRateField.optional(),
   vatMode: z.enum(["GROSS", "NET"]).optional(),
 }).refine(

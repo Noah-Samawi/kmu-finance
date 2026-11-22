@@ -69,7 +69,7 @@ const de = {
   "inv.smallBusinessLink": "Unter Briefkopf & Firma deaktivieren",
 
   "pb.capital": "Kapitalkonto",
-  "pb.capitalHint": "Einlagen − Entnahmen + Gewinnanteile",
+  "pb.capitalHint": "Einlagen − Kapitalrückzahlungen (Gewinnanteil separat)",
   "pb.outlay": "Auslagenkonto – Firma schuldet dir",
   "pb.outlayHint": "Privat ausgelegtes Geld = offener Anspruch gegen die Firma (Verbindlichkeit der Firma). Sinkt nur durch ausdrückliche Erstattung – nie Teil des Kapitalkontos.",
   "pb.firmLiability": "Verbindlichkeit der Firma",
@@ -79,8 +79,8 @@ const de = {
   "pb.kind": "Vorgang",
   "pb.kind.DEPOSIT": "Einlage",
   "pb.kind.OUTLAY": "Auslage / Ausgabe für die Firma",
-  "pb.kind.DRAW": "Entnahme",
-  "pb.kind.PROFIT": "Gewinnanteil",
+  "pb.kind.DRAW": "Kapitalrückzahlung / Entnahme",
+  "pb.kind.PROFIT": "Gewinnanteil-Auszahlung",
   "pb.kind.BUDGET": "Budget-Zuteilung",
   "pb.kind.BUDGET_RETURN": "Budget-Rückgabe",
   "pb.kind.BUDGET_SETTLED": "Budget verbraucht",
@@ -187,7 +187,7 @@ const ar: Record<MsgKey, string> = {
   "inv.smallBusinessLink": "إلغاء التفعيل في الترويسة والشركة",
 
   "pb.capital": "حساب رأس المال",
-  "pb.capitalHint": "الإيداعات − المسحوبات + حصص الأرباح",
+  "pb.capitalHint": "الإيداعات − سداد رأس المال (حصة الأرباح منفصلة)",
   "pb.outlay": "حساب المصروفات – مستحق لك على الشركة",
   "pb.outlayHint": "المال المدفوع من جيبك الخاص = مطالبة مفتوحة على الشركة (التزام على الشركة). لا ينخفض إلا بتعويض صريح – وليس جزءاً من حساب رأس المال.",
   "pb.firmLiability": "التزام على الشركة",

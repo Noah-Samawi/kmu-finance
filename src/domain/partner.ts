@@ -124,8 +124,8 @@ export function partnerPosting(kind: PartnerKind, source: FundingSource | null, 
       // Kapitalrückzahlung: Kasse/Bank −, Kapitalkonto − (Richtung Null)
       return { type: "PARTNER_DRAW", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: -a } };
     case "PROFIT":
-      // Gewinnanteil-Auszahlung: Kasse/Bank −, Kapitalkonto + (ihm gutgeschrieben)
-      return { type: "PARTNER_PROFIT", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: a } };
+      // Gewinnanteil-Auszahlung: Kasse/Bank −, Kapitalkonto unverändert (Spalte Gewinnanteil)
+      return { type: "PARTNER_PROFIT", deltas: { ...none, ...account(-a, src!), partnerDeltaCents: 0 } };
     case "BUDGET":
       return { type: "ALLOCATION", deltas: { ...none, ...account(-a, src!), walletDeltaCents: a } };
     case "BUDGET_RETURN":

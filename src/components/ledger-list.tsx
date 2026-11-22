@@ -42,6 +42,7 @@ export function LedgerList({ rows, mode, showEmployee, admin, reversedIds, branc
               {r.category && <Pill tone="amber">{categoryLabel(r.category)}</Pill>}
               {r.partnerRole === "PRIVAT" && <Pill tone="amber">Kapitalrückzahlung</Pill>}
               {r.partnerRole === "GEWINN" && <Pill tone="amber">Gewinnanteil</Pill>}
+              {r.partnerRole === "LOHN" && <Pill tone="amber">Lohn</Pill>}
               {r.partnerRole === "FIRMA" && <Pill>Betriebsausgabe</Pill>}
               {r.vatCents !== 0 && r.vatRate != null && (
                 <Pill>MwSt {r.vatRate / 100} % · {formatCents(Math.abs(r.vatCents))}</Pill>

@@ -180,17 +180,22 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
     const person = input.personId ? await loadPerson(tx, tenantId, input.personId) : null;
     const branchId = await assertBranch(tx, tenantId, input.branchId);
     const isPartner = person?.role === "PARTNER";
+    const isEmployee = person?.role === "EMPLOYEE";
     if (isPartner && !input.partnerRole) {
-      throw rule("Gesellschafter gewählt: bitte Firmenausgabe, Gewinnanteil oder Kapitalrückzahlung wählen");
+      throw rule("Gesellschafter gewählt: bitte Firmenausgabe, Gewinnanteil, Kapitalrückzahlung oder Lohn wählen");
     }
-    const role = isPartner ? input.partnerRole : null;
+    const role = input.partnerRole ?? null;
+    if (role && !isPartner && !(isEmployee && role === "LOHN")) {
+      throw rule("Diese Buchungsart ist nur für Gesellschafter (Lohn auch für Mitarbeiter)");
+    }
     const isDraw = role === "PRIVAT";
     const isProfit = role === "GEWINN";
+    const isWage = role === "LOHN";
     const isPartnerPayout = isDraw || isProfit;
     const account = input.fund === "BANK" ? "BANK" as const : "CASH" as const;
 
     if (input.fund === "BUDGET") {
-      if (person!.role !== "EMPLOYEE") throw rule("Budget-Ausgaben nur für Mitarbeiter – Gesellschafter: Firmenausgabe, Gewinnanteil oder Kapitalrückzahlung wählen");
+      if (!isEmployee) throw rule("Budget-Ausgaben nur für Mitarbeiter");
       const w = await walletBalance(tx, tenantId, person!.id);
       if (w < payCents) throw insufficient(`Budget von ${person!.name}`, w);
     } else {
@@ -214,20 +219,23 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
           : expenseDeltas(input.fund, p.vat.grossCents);
       const label = isDraw ? "Kapitalrückzahlung / Entnahme"
         : isProfit ? "Gewinnanteil-Auszahlung"
+        : isWage ? "Lohn"
         : categoryLabel(input.category);
       entries.push(await insertEntry(tx, ctx, tenantId, {
-        type, ...deltas, category: isPartnerPayout ? null : input.category, branchId, batchId,
+        type, ...deltas,
+        category: isPartnerPayout || isWage ? null : input.category,
+        branchId, batchId,
         employeeId: person?.id ?? null, bookingDate,
-        vatRate: isPartnerPayout ? null : (p.vat.vatRate || null),
-        vatCents: isPartnerPayout ? 0 : vatLedgerSign("EXPENSE", p.vat.vatCents),
-        vatMode: !isPartnerPayout && p.vat.vatRate ? p.vat.mode : null,
+        vatRate: isPartnerPayout || isWage ? null : (p.vat.vatRate || null),
+        vatCents: isPartnerPayout || isWage ? 0 : vatLedgerSign("EXPENSE", p.vat.vatCents),
+        vatMode: !isPartnerPayout && !isWage && p.vat.vatRate ? p.vat.mode : null,
         partnerRole: role,
         description: [
           label,
           input.purpose.trim(),
           `aus ${FUND_LABEL[input.fund]}`,
-          person && (isPartnerPayout ? `an ${person.name}` : input.fund !== "BUDGET" && `durch ${person.name}`),
-          !isPartnerPayout && p.vat.vatCents ? `inkl. ${p.vat.vatRate / 100} % MwSt.` : null,
+          person && (isPartnerPayout || isWage ? `an ${person.name}` : input.fund !== "BUDGET" && `durch ${person.name}`),
+          !isPartnerPayout && !isWage && p.vat.vatCents ? `inkl. ${p.vat.vatRate / 100} % MwSt.` : null,
         ].filter(Boolean).join(" · "),
       }));
     }
@@ -238,7 +246,7 @@ export async function recordExpense(ctx: Ctx, input: z.infer<typeof expenseSchem
     }
     const netCents = splits.reduce((s, p) => s + p.vat.netCents, 0);
     const vatCents = splits.reduce((s, p) => s + p.vat.vatCents, 0);
-    const auditAction = isDraw ? "partner.draw" : isProfit ? "partner.profit" : "cash.expense";
+    const auditAction = isDraw ? "partner.draw" : isProfit ? "partner.profit" : isWage ? "cash.wage" : "cash.expense";
     await audit(tx, ctx, auditAction, "LedgerEntry", entries[0].id, {
       fund: input.fund, category: input.category, amountCents: payCents, netCents, vatCents, batchId,
       lines: splits.map((p) => ({ vatRate: p.vatRateBp, amountCents: p.amountCents, grossCents: p.vat.grossCents })),

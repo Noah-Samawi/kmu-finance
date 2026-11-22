@@ -55,29 +55,55 @@ export function VatFields({
   );
 }
 
-export type PartnerExpenseRole = "FIRMA" | "PRIVAT" | "GEWINN";
+export type PartnerExpenseRole = "FIRMA" | "PRIVAT" | "GEWINN" | "LOHN";
 
-/** Pflichtfeld, sobald ein Gesellschafter gewählt ist */
-export function PartnerRoleField({ show, value, onChange }: {
+/** Art der Zuordnung – Pflicht bei Gesellschafter; bei Mitarbeiter optional Lohn */
+export function PartnerRoleField({ show, value, onChange, mode = "partner" }: {
   show: boolean; value: "" | PartnerExpenseRole; onChange: (v: "" | PartnerExpenseRole) => void;
+  mode?: "partner" | "employee";
 }) {
   if (!show) return null;
+  const options = mode === "employee"
+    ? ([
+      ["LOHN", "Lohn", "Kasse/Bank −; als Lohn auf dem Personenkonto ausgewiesen."],
+    ] as const)
+    : ([
+      ["FIRMA", "Firmenausgabe / Betriebsausgabe", "Kasse/Bank −; Spalte Betriebsausgaben (Kapital unverändert)."],
+      ["GEWINN", "Gewinnanteil-Auszahlung", "Kasse/Bank −; Spalte Gewinnanteil (Kapitalkonto unverändert)."],
+      ["PRIVAT", "Kapitalrückzahlung / Entnahme", "Kasse/Bank − und Kapitalkonto − (Richtung Null)."],
+      ["LOHN", "Lohn", "Kasse/Bank −; Spalte Lohn (Kapital unverändert)."],
+    ] as const);
   return (
     <fieldset className="rounded-lg border-2 border-ink/20 bg-paper p-3">
-      <legend className="px-1 text-sm font-semibold">Art der Gesellschafter-Buchung</legend>
-      <p className="mb-2 text-xs text-muted">Pflicht – Kasse/Bank wird belastet; die Wirkung auf dem Gesellschafter-Konto hängt von der Art ab.</p>
+      <legend className="px-1 text-sm font-semibold">
+        {mode === "employee" ? "Als Lohn buchen? (optional)" : "Art der Gesellschafter-Buchung"}
+      </legend>
+      <p className="mb-2 text-xs text-muted">
+        {mode === "employee"
+          ? "Leer lassen = normale Zuordnung. „Lohn“ = Auszahlung erscheint in der Lohn-Spalte."
+          : "Pflicht – Kasse/Bank wird belastet; die Spalte oben richtet sich nach der Art."}
+      </p>
       <div className="space-y-2">
-        {([
-          ["FIRMA", "Firmenausgabe / Betriebsausgabe", "Kasse/Bank − als Betriebsausgabe; dem Gesellschafter nur zugeordnet (Kapital unverändert)."],
-          ["GEWINN", "Gewinnanteil-Auszahlung", "Kasse/Bank −; dem Gesellschafter als Gewinnanteil auf dem Kapitalkonto gutgeschrieben (+)."],
-          ["PRIVAT", "Kapitalrückzahlung / Entnahme", "Kasse/Bank − und Kapitalkonto − (z. B. eingelegtes Kapital zurückzahlen, Richtung Null)."],
-        ] as const).map(([v, title, hint]) => (
+        {mode === "employee" && (
+          <label className={cx(
+            "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2",
+            value === "" ? "border-ledger bg-ledger-soft" : "border-line bg-surface hover:border-ink/30",
+          )}>
+            <input type="radio" name="partnerRole" value="" className="mt-1 accent-[var(--color-ledger)]"
+              checked={value === ""} onChange={() => onChange("")} />
+            <span>
+              <span className="block text-sm font-medium">Keine Lohn-Buchung</span>
+              <span className="block text-xs text-muted">Ausgabe nur zuordnen, ohne Lohn-Spalte.</span>
+            </span>
+          </label>
+        )}
+        {options.map(([v, title, hint]) => (
           <label key={v} className={cx(
             "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2",
             value === v ? "border-ledger bg-ledger-soft" : "border-line bg-surface hover:border-ink/30",
           )}>
             <input type="radio" name="partnerRole" value={v} className="mt-1 accent-[var(--color-ledger)]"
-              checked={value === v} onChange={() => onChange(v)} required={show} />
+              checked={value === v} onChange={() => onChange(v)} required={mode === "partner"} />
             <span>
               <span className="block text-sm font-medium">{title}</span>
               <span className="block text-xs text-muted">{hint}</span>
