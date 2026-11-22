@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx --env-file=.env --env-file=.env.local src/infrastructure/db/migrate.ts",
+    "db:migrate": "env -u DATABASE_URL -u MIGRATION_DATABASE_URL tsx --env-file=.env --env-file=.env.local src/infrastructure/db/migrate.ts",
     "db:ensure-app-role": "tsx --env-file=.env --env-file=.env.local src/infrastructure/db/ensure-app-role.ts",
     "db:smoke-rls": "tsx --env-file=.env --env-file=.env.local src/infrastructure/db/smoke-rls.ts",
     "db:seed": "tsx --env-file=.env --env-file=.env.local src/infrastructure/db/seed.ts",
