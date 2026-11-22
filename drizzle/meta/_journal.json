@@ -120,6 +120,13 @@
       "when": 1794900000000,
       "tag": "0016_grant_kmu_app_phase1",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0017_belege",
+      "breakpoints": true
     }
   ]
 }

@@ -65,6 +65,10 @@ export const partnerBookingKindEnum = pgEnum("PartnerBookingKind", [
   "PURCHASE_CAPITAL", "PURCHASE_BUDGET",
 ]);
 export const receiptStatusEnum = pgEnum("ReceiptStatus", ["SUBMITTED", "APPROVED", "REJECTED"]);
+/** DATEV-ähnliche Firmen-Belegablage (unabhängig von Mitarbeiter-Receipt) */
+export const belegStatusEnum = pgEnum("BelegStatus", ["INBOX", "FILED", "TRASH"]);
+export const belegDocTypeEnum = pgEnum("BelegDocType", ["CASH", "INCOMING_INVOICE", "OUTGOING_INVOICE", "OTHER"]);
+export const belegOcrStatusEnum = pgEnum("BelegOcrStatus", ["PENDING", "DONE", "FAILED"]);
 export const periodTypeEnum = pgEnum("PeriodType", ["DAY", "MONTH"]);
 
 // ---------------------------------------------------------------------
@@ -366,6 +370,51 @@ export const ledgerEntries = pgTable("LedgerEntry", {
   index("Ledger_tenant_date_idx").on(t.tenantId, t.bookingDate),
   index("Ledger_tenant_emp_date_idx").on(t.tenantId, t.employeeId, t.bookingDate),
   index("Ledger_tenant_type_idx").on(t.tenantId, t.type),
+]);
+
+/**
+ * Firmen-Belege (DATEV-Prinzip): Upload → Posteingang → prüfen/buchen → Belegablage.
+ * Unabhängig von Mitarbeiter-Receipt (Wallet). Kein automatischer Wallet-Abzug.
+ */
+export const belege = pgTable("Beleg", {
+  id: id(),
+  tenantId: text("tenantId").notNull().references(() => tenants.id),
+  companyId: text("companyId").notNull().references(() => companies.id),
+  status: belegStatusEnum("status").notNull().default("INBOX"),
+  docType: belegDocTypeEnum("docType").notNull().default("OTHER"),
+  branchId: text("branchId").references(() => branches.id),
+  /** EXPENSE | INCOME – gesetzt spätestens beim Buchen */
+  direction: text("direction").$type<"EXPENSE" | "INCOME">(),
+  accountKind: accountKindEnum("accountKind"),
+  amountCents: integer("amountCents"),
+  vatRate: integer("vatRate"),
+  vatCents: integer("vatCents").notNull().default(0),
+  vatMode: text("vatMode").$type<"GROSS" | "NET">().default("GROSS"),
+  merchant: text("merchant"),
+  description: text("description"),
+  receiptNumber: text("receiptNumber"),
+  category: text("category"),
+  bookingDate: timestamp("bookingDate", { withTimezone: true }),
+  fileKey: text("fileKey").notNull(),
+  fileMime: text("fileMime").notNull(),
+  fileName: text("fileName"),
+  fileSha256: text("fileSha256").notNull(),
+  ocrStatus: belegOcrStatusEnum("ocrStatus").notNull().default("PENDING"),
+  ocrJson: jsonb("ocrJson"),
+  lines: jsonb("lines").$type<{ amountCents: number; vatRate: number; category?: string | null }[]>(),
+  ledgerEntryId: text("ledgerEntryId").unique().references(() => ledgerEntries.id),
+  batchId: text("batchId"),
+  createdById: text("createdById").notNull().references(() => users.id),
+  trashedAt: timestamp("trashedAt", { withTimezone: true }),
+  filedAt: timestamp("filedAt", { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index("Beleg_tenant_status_idx").on(t.tenantId, t.status),
+  index("Beleg_tenant_date_idx").on(t.tenantId, t.bookingDate),
+  index("Beleg_tenant_branch_idx").on(t.tenantId, t.branchId),
+  // SHA-Unique nur außerhalb Papierkorb (wie IncomingBill) – in SQL-Migration als Partial-Index
+  index("Beleg_tenant_sha_idx").on(t.tenantId, t.fileSha256),
 ]);
 
 // Beleg zu einer Hauptbuchzeile (z. B. Metro-Einkauf aus der Kasse) – unveränderlich

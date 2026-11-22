@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n-server";
 import type { MsgKey } from "@/lib/i18n";
 import { listReceipts } from "@/application/receipts/receipts";
+import { countBelegInbox } from "@/application/belege/belege";
 import { NavLink } from "@/components/nav-link";
 import { LogoutButton } from "@/components/logout-button";
 import { LanguageSwitcher } from "@/components/i18n";
@@ -27,7 +28,11 @@ const NAV: readonly { href: string; label: MsgKey; badgeKey?: "receipts"; ownerO
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("ADMIN");
   const t = await getT();
-  const pending = (await listReceipts(user, { status: "SUBMITTED" })).length;
+  const [staffPending, inboxPending] = await Promise.all([
+    listReceipts(user, { status: "SUBMITTED" }).then((r) => r.length),
+    countBelegInbox(user).catch(() => 0),
+  ]);
+  const pending = staffPending + inboxPending;
   const badge = (k?: string) => (k === "receipts" ? pending : undefined);
   const isOwner = user.role === "TENANT_OWNER" || user.role === "ADMIN";
   const nav = NAV.filter((n) => !n.ownerOnly || isOwner);
